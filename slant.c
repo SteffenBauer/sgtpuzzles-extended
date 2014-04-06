@@ -265,7 +265,7 @@ static char *validate_params(const game_params *params, int full)
 /*
  * Scratch space for solver.
  */
-struct solver_scratch_slant {
+struct solver_scratch {
     /*
      * Disjoint set forest which tracks the connected sets of
      * points.
@@ -334,10 +334,10 @@ struct solver_scratch_slant {
     const signed char *clues;
 };
 
-static struct solver_scratch_slant *new_scratch(int w, int h)
+static struct solver_scratch *new_scratch(int w, int h)
 {
     int W = w+1, H = h+1;
-    struct solver_scratch_slant *ret = snew(struct solver_scratch_slant);
+    struct solver_scratch *ret = snew(struct solver_scratch);
     ret->connected = snewn(W*H, int);
     ret->exits = snewn(W*H, int);
     ret->border = snewn(W*H, unsigned char);
@@ -347,11 +347,11 @@ static struct solver_scratch_slant *new_scratch(int w, int h)
     return ret;
 }
 
-static struct solver_scratch_slant *dup_scratch(int w, int h, const struct solver_scratch_slant *sc)
+static struct solver_scratch *dup_scratch(int w, int h, const struct solver_scratch *sc)
 {
     int W = w+1, H = h+1;
     
-    struct solver_scratch_slant *ret = snew(struct solver_scratch_slant);
+    struct solver_scratch *ret = snew(struct solver_scratch);
    
     if (sc->connected != NULL) {
         ret->connected = snewn(W*H, int);
@@ -388,7 +388,7 @@ static struct solver_scratch_slant *dup_scratch(int w, int h, const struct solve
     return ret;
 }
 
-static void free_scratch(struct solver_scratch_slant *sc)
+static void free_scratch(struct solver_scratch *sc)
 {
     sfree(sc->vbitmap);
     sfree(sc->slashval);
@@ -404,7 +404,7 @@ static void free_scratch(struct solver_scratch_slant *sc)
  * arrays.
  */
 static void merge_vertices(int *connected,
-               struct solver_scratch_slant *sc, int i, int j)
+               struct solver_scratch *sc, int i, int j)
 {
     int exits = -1, border = FALSE;    /* initialise to placate optimiser */
 
@@ -438,7 +438,7 @@ static void merge_vertices(int *connected,
  * count, so we must decrement the exit count for the group as a
  * whole.
  */
-static void decr_exits(struct solver_scratch_slant *sc, int i)
+static void decr_exits(struct solver_scratch *sc, int i)
 {
     if (sc->clues[i] < 0) {
     i = dsf_canonify(sc->connected, i);
@@ -448,7 +448,7 @@ static void decr_exits(struct solver_scratch_slant *sc, int i)
 
 static void fill_square(int w, int h, int x, int y, int v,
             signed char *soln,
-            int *connected, struct solver_scratch_slant *sc)
+            int *connected, struct solver_scratch *sc)
 {
     int W = w+1 /*, H = h+1 */;
 
@@ -485,7 +485,7 @@ static void fill_square(int w, int h, int x, int y, int v,
     }
 }
 
-static int vbitmap_clear(int w, int h, struct solver_scratch_slant *sc,
+static int vbitmap_clear(int w, int h, struct solver_scratch *sc,
                          int x, int y, int vbits, char *reason, ...)
 {
     int done_something = FALSE;
@@ -700,8 +700,8 @@ static int check_completed(int w, int h,
 }
 
 
-static void initialize_solver_slant(int w, int h, const signed char *clues,
-                              signed char *soln, struct solver_scratch_slant *sc,
+static void initialize_solver(int w, int h, const signed char *clues,
+                              signed char *soln, struct solver_scratch *sc,
                       int difficulty)
 {
     int W = w+1, H = h+1;
@@ -783,7 +783,7 @@ int sc_cmp(const void *a, const void *b) {
  * ambiguity or failure to converge.
  */
 static int slant_solve(int w, int h, const signed char *clues,
-               signed char *soln, struct solver_scratch_slant *sc,
+               signed char *soln, struct solver_scratch *sc,
                int difficulty)
 {
     int W = w+1, H = h+1;
@@ -1337,8 +1337,8 @@ static int slant_solve(int w, int h, const signed char *clues,
         }
 
         if (ret < 0) {                
-            struct solver_scratch_slant *new_sc;
-            struct solver_scratch_slant *tmp_sc;
+            struct solver_scratch *new_sc;
+            struct solver_scratch *tmp_sc;
 
             new_soln = snewn(w*h, signed char);
             tmp_soln = snewn(w*h, signed char);
@@ -2079,9 +2079,9 @@ static char *new_game_desc(const game_params *params, random_state *rs,
     int w = params->w, h = params->h, W = w+1, H = h+1;
     signed char *soln, *tmpsoln, *clues;
     int *clueindices;
-    struct solver_scratch_slant *sc;
+    struct solver_scratch *sc;
     struct solver_scratch_creek *scc;
-    int x, y, v, i, j, d;
+    int x, y, v, i, j;
     char *desc;
     char cont;
     int mode;
@@ -2125,7 +2125,7 @@ static char *new_game_desc(const game_params *params, random_state *rs,
          * undecided, which we can then fill in uniquely.
          */
         if (mode == 0) {
-            initialize_solver_slant(w, h, clues, tmpsoln, sc, DIFF_EASY);
+            initialize_solver(w, h, clues, tmpsoln, sc, DIFF_EASY);
             assert(slant_solve(w, h, clues, tmpsoln, sc, DIFF_EASY) == 1);
         }
         else {
@@ -2148,18 +2148,14 @@ static char *new_game_desc(const game_params *params, random_state *rs,
         
         shuffle(clueindices, W*H, sizeof(*clueindices), rs);
         
-        for (j = 0; j <= params->diff; j++) {
-            printf("Starting pass %i\n", j);
-            
+        for (j = 0; j < 2; j++) {
             for (i = 0; i < W*H; i++) {
                 int pass, yb, xb;
 
                 y = clueindices[i] / W;
                 x = clueindices[i] % W;
                 v = clues[y*W+x];
-
                 if (v == -1) continue;
-
                 /*
                  * Identify which pass we should process this point
                  * in. If it's an obvious start point, _or_ we're
@@ -2172,23 +2168,20 @@ static char *new_game_desc(const game_params *params, random_state *rs,
                     (v == 2 && (xb||yb)) || (v == 1 && xb && yb))
                     pass = 0;
                 else
-                    pass = j;
+                    pass = 1;
 
                 if (pass == j) {
-                    unsigned char solvable = FALSE;
-                    int upto = (pass == 1 && params->diff == DIFF_HARD) ? DIFF_TRICKY : params->diff;
                     clues[y*W+x] = -1;
-                    for (d = DIFF_EASY; d <= upto; d++) {
-                        if (mode == 0) initialize_solver_slant(w, h, clues, tmpsoln, sc, d);
-                        else           initialize_solver_creek(w, h, clues, tmpsoln, scc, d);
-                        if ( (mode == 0) ? (slant_solve(w, h, clues, tmpsoln, sc, d) == 1)
-                                         : (creek_solve(w, h, clues, tmpsoln, scc, d) == 1) ) {
-                            solvable = TRUE;
-                            break;
-                        }
+                    if (mode == 0) {
+                        initialize_solver(w, h, clues, tmpsoln, sc, params->diff);                    
+                        if (slant_solve(w, h, clues, tmpsoln, sc, params->diff) != 1)
+                            clues[y*W+x] = v;           /* put it back */                
                     }
-                    if (!solvable) clues[y*W+x] = v;       
-       
+                    else {
+                        initialize_solver_creek(w, h, clues, tmpsoln, scc, params->diff);                    
+                        if (creek_solve(w, h, clues, tmpsoln, scc, params->diff) != 1)
+                            clues[y*W+x] = v;           /* put it back */                
+                    }    
                 }
             }
         }
@@ -2200,14 +2193,13 @@ static char *new_game_desc(const game_params *params, random_state *rs,
          */
         if (params->diff > 0) {
             if (mode == 0) {
-                initialize_solver_slant(w, h, clues, tmpsoln, sc, params->diff - 1);
-                cont = slant_solve(w, h, clues, tmpsoln, sc, params->diff - 1) <= 1;            
-                printf("Puzzle is %s solvable at lower level\n", cont ? "" : "not");
+                initialize_solver(w, h, clues, tmpsoln, sc, params->diff - 1);
+                cont = slant_solve(w, h, clues, tmpsoln, sc, params->diff - 1) <= 1;
+                
             }
             else {
                 initialize_solver_creek(w, h, clues, tmpsoln, scc, params->diff - 1);
                 cont = creek_solve(w, h, clues, tmpsoln, scc, params->diff - 1) <= 1;
-                printf("Puzzle is %s solvable at lower level\n", cont ? "" : "not");
             }
         }
         else
@@ -2270,8 +2262,6 @@ static char *new_game_desc(const game_params *params, random_state *rs,
     sfree(clues);
     sfree(tmpsoln);
     sfree(soln);
-
-    printf("Puzzle description: %s\n", desc);
 
     return desc;
 }
@@ -2395,8 +2385,8 @@ static char *solve_game(const game_state *state, const game_state *currstate,
         bs = -1;
         
         if (state->p.mode == 0) {
-            struct solver_scratch_slant *sc = new_scratch(w, h);    
-            initialize_solver_slant(w, h, state->clues->clues, soln, sc, DIFF_HARD);
+            struct solver_scratch *sc = new_scratch(w, h);    
+            initialize_solver(w, h, state->clues->clues, soln, sc, DIFF_HARD);
             ret = slant_solve(w, h, state->clues->clues, soln, sc, DIFF_HARD);
             free_scratch(sc);
         }
@@ -3272,7 +3262,7 @@ int main(int argc, char **argv)
     game_state *s;
     char *id = NULL, *desc, *err, *soltxt;
     int i, ret, diff, unsolved, really_verbose = FALSE, summary = FALSE;
-    struct solver_scratch_slant *sc;
+    struct solver_scratch *sc;
     struct solver_scratch_creek *scc;
     
     while (--argc > 0) {
@@ -3326,7 +3316,7 @@ int main(int argc, char **argv)
         verbose = FALSE;
         
         if (p->mode == 0) {
-            initialize_solver_slant(p->w, p->h, s->clues->clues,
+            initialize_solver(p->w, p->h, s->clues->clues,
               s->soln, sc, diff);
             ret = slant_solve(p->w, p->h, s->clues->clues,
                 s->soln, sc, diff);
@@ -3348,7 +3338,7 @@ int main(int argc, char **argv)
     verbose = really_verbose;
 
     if (p->mode == 0) {
-        initialize_solver_slant(p->w, p->h, s->clues->clues,
+        initialize_solver(p->w, p->h, s->clues->clues,
           s->soln, sc, diff);
         ret = slant_solve(p->w, p->h, s->clues->clues,
             s->soln, sc, diff);
