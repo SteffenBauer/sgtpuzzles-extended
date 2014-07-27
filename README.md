@@ -16,6 +16,8 @@ Extensions/Modifications I wrote for the famous & excellent [Simon Tathams Porta
     * More sophisticated puzzle generator
     * Four difficulty levels "Easy", "Normal", "Tricky", "Hard"
     * New option "Remove clues", similiar to the option in the 'Magnets' puzzle
+* Unequal:
+    * New puzzle variation: "Kropki", implementation of [Kropki](http://wiki.logic-masters.de/index.php?title=Kropki/de)
 * Unfinished/Stellar: New puzzle "Stellar", implementation of [Sternenhaufen](http://www.janko.at/Raetsel/Sternenhaufen/index.htm)
 
 ## Usage:
