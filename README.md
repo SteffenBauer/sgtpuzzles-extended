@@ -1,11 +1,12 @@
 sgtpuzzles-extended
 ===================
+![puzzles](https://raw.githubusercontent.com/SteffenBauer/sgtpuzzles-extended/puzzles.png)
 
 Extensions/Modifications I wrote for the famous & excellent [Simon Tathams Portable Puzzle Collection](http://www.chiark.greenend.org.uk/~sgtatham/puzzles/)
 
 ## Extensions:
 
-* Solo: Additional keyboard controls to support game solving
+* Solo: Additional keyboard controls to support game solving and 
     * Pressing '+' automatically sets all possible game clues
     * Pressing '-' removes all impossible game clues
     * Pressing a number while no grid cell is selected highlights all grid cells with that number. Left/Right click on a clue in this highlight mode sets the number / removes the clue.
@@ -19,16 +20,13 @@ Extensions/Modifications I wrote for the famous & excellent [Simon Tathams Porta
 * Unequal:
     * New puzzle variation: "Kropki", implementation of [Kropki](http://wiki.logic-masters.de/index.php?title=Kropki/de)
 * Unfinished/Stellar: New puzzle "Stellar", implementation of [Sternenhaufen](http://www.janko.at/Raetsel/Sternenhaufen/index.htm)
+    * So far playable in difficulty "Normal".
 
 ## Usage:
 
 You need a copy of the SGT Puzzle collection source code. Copy the source files from this repository into this build directory, and recompile.
 
 For instructions how to compile the game collection, see the README accompanying the original puzzle collection.
-
-## Soon
-
-Android port
 
 ## LICENSE
 
