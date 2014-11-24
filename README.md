@@ -1,6 +1,6 @@
 sgtpuzzles-extended
 ===================
-![puzzles](https://raw.githubusercontent.com/SteffenBauer/sgtpuzzles-extended/puzzles.png)
+![puzzles](https://raw.githubusercontent.com/SteffenBauer/sgtpuzzles-extended/master/puzzles.png)
 
 Extensions/Modifications I wrote for the famous & excellent [Simon Tathams Portable Puzzle Collection](http://www.chiark.greenend.org.uk/~sgtatham/puzzles/)
 
