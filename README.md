@@ -28,6 +28,14 @@ You need a copy of the SGT Puzzle collection source code. Copy the source files 
 
 For instructions how to compile the game collection, see the README accompanying the original puzzle collection.
 
+## Android
+
+Files for the [Android port by Chris Boyle](https://github.com/chrisboyle/sgtpuzzles)
+
+Contains also [additional puzzles](https://github.com/x-sheep/puzzles-unreleased) by Lennard Sprong
+
+Should compile with version up to 'before-android-studio' (ant version)
+
 ## LICENSE
 
 Copyright (c) 2013-2014 Simon Tatham, Steffen Bauer
