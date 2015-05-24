@@ -21,6 +21,8 @@ Extensions/Modifications I wrote for the famous & excellent [Simon Tathams Porta
     * New puzzle variation: "Kropki", implementation of [Kropki](http://wiki.logic-masters.de/index.php?title=Kropki/de)
 * Unfinished/Stellar: New puzzle "Stellar", implementation of [Sternenhaufen](http://www.janko.at/Raetsel/Sternenhaufen/index.htm)
     * So far playable in difficulty "Normal".
+* Unfinished/Walls: New puzzle "Walls", find a path through a maze of walls
+    * So far very crudely playable in difficulty "Easy". Needs lots of work.
 
 ## Usage:
 
