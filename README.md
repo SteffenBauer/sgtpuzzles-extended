@@ -6,7 +6,7 @@ Extensions/Modifications I wrote for the famous & excellent [Simon Tathams Porta
 
 ## Extensions:
 
-* Solo: Additional keyboard controls to support game solving and 
+* Solo: Additional keyboard controls to support game solving like used in some other sudoku apps
     * Pressing '+' automatically sets all possible game clues
     * Pressing '-' removes all impossible game clues
     * Pressing a number while no grid cell is selected highlights all grid cells with that number. Left/Right click on a clue in this highlight mode sets the number / removes the clue.

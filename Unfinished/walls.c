@@ -2,6 +2,26 @@
  * walls.c
  */
 
+/* 
+ * TODO:
+ *  
+ *  - Prohibit wall placing over lines
+ *  - Draw area and elements outside border
+ *  - Implement error handling
+ *  - Implement solved flash
+ *  - Implement line dragging
+ *  - Implement state save / recall
+ *  - Solver:
+ *      - Optimize line reducer / wall placement
+ *      - Implement stride solver
+ *      - Implement board partition check
+ *      - Implement exit parity check
+ *      - Implement area parity check
+ *      - Implement backtracking
+ *
+ */
+
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,8 +30,6 @@
 #include <math.h>
 
 #include "puzzles.h"
-#include "grid.h"
-#include "loopgen.h"
 
 /* Macro ickery copied from slant.c */
 #define DIFFLIST(A) \
@@ -701,7 +719,7 @@ static char *new_game_desc(const game_params *params, random_state *rs,
     sfree(wallindices);
     for (i=0;i<w*h;i++) new->lines[i] = 0x00;
  
-    game_text_format(new); printf("\n");
+    sfree(game_text_format(new)); printf("\n");
 
     
     /* We have a valid puzzle! */
@@ -716,12 +734,17 @@ static char *new_game_desc(const game_params *params, random_state *rs,
 			wrun = erun = 0;
 		}
 		else if(new->walls[i] && erun > 0) {
-            while (erun > 26) {
+            while (erun >= 26) {
                 *e++ = 'z';
                 erun -= 26;
             }
-			*e++ = ('a' + erun - 1);
-			erun = 0; wrun = -1;
+            if (erun == 0) {
+                wrun = 0;
+            }
+            else {
+                *e++ = ('a' + erun - 1);
+                erun = 0; wrun = -1;
+            }
 		}
 		if(!new->walls[i]) erun++;
 		else   	           wrun++;
@@ -1184,7 +1207,9 @@ int main(int argc, char **argv) {
     int c;
     rs = random_new("123456", 6);
     p = default_params();
- 
+    p->w = 6;
+    p->h = 5;
+    
     while (TRUE) {
         sfree(new_game_desc(p, rs, NULL, 0));
         c = getchar();
