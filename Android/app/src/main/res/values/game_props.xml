@@ -1,0 +1,221 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+	<array name="games">
+		<item>blackbox</item>
+		<item>boats</item>
+		<item>bridges</item>
+		<item>cube</item>
+		<item>dominosa</item>
+		<item>fifteen</item>
+		<item>filling</item>
+		<item>flip</item>
+		<item>flood</item>
+		<item>galaxies</item>
+		<item>guess</item>
+		<item>inertia</item>
+		<item>keen</item>
+		<item>lightup</item>
+		<item>loopy</item>
+		<item>magnets</item>
+		<item>map</item>
+		<item>mines</item>
+		<item>net</item>
+		<item>netslide</item>
+		<item>pattern</item>
+		<item>pearl</item>
+		<item>pegs</item>
+		<item>range</item>
+		<item>rect</item>
+		<item>rome</item>
+		<item>salad</item>
+		<item>samegame</item>
+		<item>signpost</item>
+		<item>singles</item>
+		<item>sixteen</item>
+		<item>slant</item>
+		<item>solo</item>
+		<item>tents</item>
+		<item>towers</item>
+		<item>tracks</item>
+		<item>twiddle</item>
+		<item>undead</item>
+		<item>unequal</item>
+		<item>unruly</item>
+		<item>untangle</item>
+	</array>
+	<!-- Is the game capable of arrows? Default true. -->
+	<bool name="untangle_arrows_capable">false</bool>
+	<!-- Should the game have arrows by default? Default false.
+	This is for puzzles where the default preset has small squares, or diagonals are needed.
+	Note that if a hardware D-pad or trackball is present, these are ignored. -->
+	<bool name="blackbox_arrows_default">true</bool>
+	<bool name="flood_arrows_default">true</bool>
+	<bool name="inertia_arrows_default">true</bool>
+	<bool name="mines_arrows_default">true</bool>
+	<bool name="pattern_arrows_default">true</bool>
+	<bool name="tracks_arrows_default">true</bool>
+	<!-- How to handle drag and revert for each game: -->
+	<!-- By default, and for games where a touch means move in that direction, allow a swipe
+	to do the same and don't try to revert anything: if the user tries to swipe in the
+	direction they want to move, it's better to have a move happen towards where they started,
+	so they learn, than to have nothing happen. -->
+	<string translatable="false" name="cube_drag_mode">unmodified</string>
+	<string translatable="false" name="fifteen_drag_mode">unmodified</string>
+	<string translatable="false" name="filling_drag_mode">unmodified</string>
+	<string translatable="false" name="net_drag_mode">unmodified</string>
+	<string translatable="false" name="rome_drag_mode">unmodified</string>
+	<string translatable="false" name="twiddle_drag_mode">unmodified</string>
+	<!-- For games where a drag can be canceled by going off-screen, do that. -->
+	<string translatable="false" name="boats_drag_mode">off_screen</string>
+	<string translatable="false" name="galaxies_drag_mode">off_screen</string>
+	<string translatable="false" name="map_drag_mode">off_screen</string>
+	<string translatable="false" name="mines_drag_mode">off_screen</string>
+	<string translatable="false" name="pattern_drag_mode">off_screen</string>
+	<string translatable="false" name="pegs_drag_mode">off_screen</string>
+	<string translatable="false" name="rectangles_drag_mode">off_screen</string>
+	<string translatable="false" name="tents_drag_mode">off_screen</string>
+	<string translatable="false" name="tracks_drag_mode">off_screen</string>
+	<string translatable="false" name="untangle_drag_mode">off_screen</string>
+	<!-- For games where dragging something off the board would be harmful, revert by
+	dragging back to the start of the drag instead. -->
+	<string translatable="false" name="bridges_drag_mode">start</string>
+	<string translatable="false" name="guess_drag_mode">start</string>
+	<string translatable="false" name="pearl_drag_mode">start</string>
+	<string translatable="false" name="signpost_drag_mode">start</string>
+	<!-- For many games with a cursor and no drag facilities, just ignore drags completely.
+	The reason we don't just enable one-finger pan in these games is it would be an inconsistent
+	UI since all the other games can't. -->
+	<string translatable="false" name="blackbox_drag_mode">prevent</string>
+	<string translatable="false" name="dominosa_drag_mode">prevent</string>
+	<string translatable="false" name="flip_drag_mode">prevent</string>
+	<string translatable="false" name="flood_drag_mode">prevent</string>
+	<string translatable="false" name="inertia_drag_mode">prevent</string>
+	<string translatable="false" name="keen_drag_mode">prevent</string>
+	<string translatable="false" name="lightup_drag_mode">prevent</string>
+	<string translatable="false" name="loopy_drag_mode">prevent</string>
+	<string translatable="false" name="magnets_drag_mode">prevent</string>
+	<string translatable="false" name="netslide_drag_mode">prevent</string>
+	<string translatable="false" name="range_drag_mode">prevent</string>
+	<string translatable="false" name="salad_drag_mode">prevent</string>
+	<string translatable="false" name="samegame_drag_mode">prevent</string>
+	<string translatable="false" name="singles_drag_mode">prevent</string>
+	<string translatable="false" name="sixteen_drag_mode">prevent</string>
+	<string translatable="false" name="slant_drag_mode">prevent</string>
+	<string translatable="false" name="solo_drag_mode">prevent</string>
+	<string translatable="false" name="towers_drag_mode">prevent</string>
+	<string translatable="false" name="undead_drag_mode">prevent</string>
+	<string translatable="false" name="unequal_drag_mode">prevent</string>
+	<string translatable="false" name="unruly_drag_mode">prevent</string>
+	<!-- Night mode mostly just changes the background, but some colours need inverting/tweaking. -->
+	<color name="blackbox_night_colour_text">#ffffff</color>
+	<color name="blackbox_night_colour_ball_revealed">#999999</color>
+	<color name="boats_night_colour_grid">#ffffff</color>
+	<color name="boats_night_colour_water">#0000bb</color>
+	<color name="boats_night_colour_ship_clue">#666666</color>
+	<color name="boats_night_colour_ship_guess">#888888</color>
+	<color name="boats_night_colour_cursor_a">#ffffff</color>
+	<color name="boats_night_colour_ship_fleet_stripe">#ffffff</color>
+	<color name="boats_night_colour_count">#ffffff</color>
+	<color name="bridges_night_colour_foreground">#ffffff</color>
+	<color name="bridges_night_colour_mark">#aaaaaa</color>
+	<color name="cube_night_colour_border">#ffffff</color>
+	<color name="dominosa_night_colour_text">#ffffff</color>
+	<color name="dominosa_night_colour_domino">#ffffff</color>
+	<color name="dominosa_night_colour_dominotext">#000000</color>
+	<color name="fifteen_night_colour_text">#ffffff</color>
+	<color name="filling_night_colour_grid">#ffffff</color>
+	<color name="galaxies_night_colour_edge">#ffffff</color>
+	<color name="galaxies_night_colour_arrow">#ffffff</color>
+	<color name="galaxies_night_colour_whitebg">#bbbbbb</color>
+	<color name="guess_night_colour_frame">#666666</color>
+	<color name="guess_night_colour_cursor">#ffffff</color>
+	<color name="inertia_night_colour_outline">#888888</color>
+	<color name="inertia_night_colour_mine">#666666</color>
+	<color name="inertia_night_colour_wall">#555555</color>
+	<color name="inertia_night_colour_highlight">#888888</color>
+	<color name="inertia_night_colour_lowlight">#444444</color>
+	<color name="keen_night_colour_grid">#ffffff</color>
+	<color name="keen_night_colour_user">#00bb00</color>
+	<color name="lightup_night_colour_black">#666666</color>
+	<color name="loopy_night_colour_foreground">#ffffff</color>
+	<color name="loopy_night_colour_satisfied">#ffffff</color>
+	<color name="loopy_night_colour_lineunknown">#808000</color>
+	<color name="magnets_night_colour_text">#ffffff</color>
+	<color name="magnets_night_colour_negative">#ffffff</color>
+	<color name="map_night_colour_grid">#888888</color>
+	<color name="mines_night_colour_background2">#999999</color>
+	<color name="mines_night_colour_flagbase">#888888</color>
+	<color name="mines_night_colour_query">#888888</color>
+	<color name="mines_night_colour_highlight">#666666</color>
+	<color name="mines_night_colour_lowlight">#222222</color>
+	<color name="net_night_colour_wire">#888888</color>
+	<color name="net_night_colour_endpoint">#3636b3</color>
+	<color name="net_night_colour_locked">#444444</color>
+	<color name="netslide_night_colour_wire">#888888</color>
+	<color name="netslide_night_colour_endpoint">#3636b3</color>
+	<color name="pattern_night_colour_text">#ffffff</color>
+	<color name="pearl_night_colour_black">#666666</color>
+	<color name="pearl_night_colour_dragon">#3636B3</color>
+	<color name="pearl_night_colour_error">#e62e2e</color>
+	<color name="pegs_night_colour_peg">#3636B3</color>
+	<color name="pegs_night_colour_highlight">#888888</color>
+	<color name="pegs_night_colour_lowlight">#555555</color>
+	<color name="range_night_colour_grid">#ffffff</color>
+	<color name="range_night_colour_error">#e62e2e</color>
+	<color name="rect_night_colour_line">#ffffff</color>
+	<color name="rect_night_colour_text">#ffffff</color>
+
+	<color name="rome_night_colour_border">#eeeeee</color>
+	<color name="rome_night_colour_arrow_fixed">#eeeeee</color>
+	<color name="rome_night_colour_goalbg">#333333</color>
+	<color name="rome_night_colour_errorbg">#bb5555</color>
+
+	<color name="salad_night_colour_border">#eeeeee</color>
+	<color name="salad_night_colour_borderclue">#eeeeee</color>
+	<color name="salad_night_colour_i_num">#eeeeee</color>
+	<color name="salad_night_colour_i_hole">#eeeeee</color>
+	<color name="salad_night_colour_i_ball">#eeeeee</color>
+	<color name="salad_night_colour_i_ballbg">#222222</color>
+	<color name="salad_night_colour_g_ball">#cccccc</color>
+	<color name="salad_night_colour_g_ballbg">#444444</color>
+
+	<color name="signpost_night_colour_arrow">#666666</color>
+	<color name="signpost_night_colour_arrow_bg_dim">#333333</color>
+	<color name="signpost_night_colour_number">#555555</color>
+	<color name="signpost_night_colour_b0">#dddddd</color>
+	<color name="singles_night_colour_black">#ffffff</color>
+	<color name="singles_night_colour_blacknum">#cccccc</color>
+	<color name="singles_night_colour_white">#000000</color>
+	<color name="sixteen_night_colour_text">#ffffff</color>
+	<color name="sixteen_night_colour_highlight">#999999</color>
+	<color name="sixteen_night_colour_lowlight">#333333</color>
+	<color name="slant_night_colour_ink">#ffffff</color>
+	<color name="slant_night_colour_slant1">#ffffff</color>
+	<color name="slant_night_colour_slant2">#ffffff</color>
+	<color name="slant_night_colour_filledsquare">#444444</color>
+	<color name="slant_night_colour_cursor">#999999</color>
+	<color name="slant_night_colour_creek_filled">#333333</color>
+	<color name="slant_night_colour_creek_empty">#aaaaaa</color>
+	<color name="solo_night_colour_xdiagonals">#666666</color>
+	<color name="solo_night_colour_grid">#ffffff</color>
+	<color name="solo_night_colour_clue">#ffffff</color>
+	<color name="solo_night_colour_user">#00bb00</color>
+	<color name="solo_night_colour_numhighlight">#33aa33</color>
+	<color name="tents_night_colour_grid">#ffffff</color>
+	<color name="towers_night_colour_grid">#ffffff</color>
+	<color name="towers_night_colour_user">#00bb00</color>
+	<color name="tracks_night_colour_clue">#ffffff</color>
+	<color name="tracks_night_colour_grid">#ffffff</color>
+	<color name="twiddle_night_colour_text">#ffffff</color>
+	<color name="undead_night_colour_grid">#ffffff</color>
+	<color name="undead_night_colour_text">#ffffff</color>
+	<color name="undead_night_colour_monster_outline">#444444</color>
+	<color name="unequal_night_colour_guess">#00bb00</color>
+	<color name="unequal_night_colour_text">#ffffff</color>
+	<color name="unequal_night_colour_black">#555555</color>
+	<color name="unequal_night_colour_white">#dddddd</color>
+	<color name="untangle_night_colour_background">#333333</color>
+	<color name="untangle_night_colour_line">#ffffff</color>
+	<color name="untangle_night_colour_outline">#888888</color>
+	<!-- TODO set error to #e62e2e throughout? similarly blues #3636b3 -->
+</resources>
