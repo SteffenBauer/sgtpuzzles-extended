@@ -34,9 +34,9 @@ For instructions how to compile the game collection, see the README accompanying
 
 Files for the [Android port by Chris Boyle](https://github.com/chrisboyle/sgtpuzzles)
 
-Contains also [additional puzzles](https://github.com/x-sheep/puzzles-unreleased) by Lennard Sprong
+Contains also the puzzles [boats, rome and salad](https://github.com/x-sheep/puzzles-unreleased) by Lennard Sprong
 
-Should compile with version up to 'before-android-studio' (ant version)
+Updated to the current Android sgtpuzzles version (using Android Studio)
 
 ## LICENSE
 
