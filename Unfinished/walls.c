@@ -35,6 +35,7 @@ typedef unsigned char bool;
 /* Macro ickery copied from slant.c */
 #define DIFFLIST(A) \
     A(EASY,Easy,e) \
+    A(NORMAL,Normal,n) \
     A(TRICKY,Tricky,t) \
     A(HARD,Hard,h)
 #define ENUM(upper,title,lower) DIFF_ ## upper,
@@ -84,8 +85,8 @@ struct shared_state {
 
 struct game_state {
     struct shared_state *shared;
-    char *errors;       /* size w*h: errors detected */
     char *walls;        /* size (w+1)*h + w*(h+1): placed walls / lines */
+    bool *errors;       /* size (w+1)*h + w*(h+1): errors detected */
     int completed, used_solve;
 };
 
@@ -225,14 +226,13 @@ static game_state *new_state(const game_params *params) {
     state->shared->fixed = snewn(state->shared->nw, bool);
     state->shared->refcnt = 1;
 
-    state->errors = snewn(state->shared->wh, char);
     state->walls  = snewn(state->shared->nw, char);
+    state->errors = snewn(state->shared->nw, bool);
 
-    for (i = 0; i < state->shared->wh; i++)
-        state->errors[i]= BLANK;
     for (i=0;i<state->shared->nw;i++) {
         state->shared->fixed[i] = FALSE;
         state->walls[i] = TC_UNK;
+        state->errors[i]= FALSE;
     }
 
     return state;
@@ -282,13 +282,11 @@ static game_state *dup_game(const game_state *state) {
     ret->used_solve = state->used_solve;
     ++ret->shared->refcnt;
 
-    ret->errors = snewn(state->shared->wh, char);
     ret->walls = snewn(state->shared->nw, char);
-    for (i = 0; i < state->shared->wh; i++) {
-        ret->errors[i] = state->errors[i];
-    }
+    ret->errors = snewn(state->shared->nw, bool);
     for (i=0;i<state->shared->nw; i++) {
         ret->walls[i] = state->walls[i];
+        ret->errors[i] = state->errors[i];
     }
   
     return ret;
@@ -370,7 +368,7 @@ int wall_to_grid(int wall, int w, int h, int dir) {
     return grid;
 }
 
-int check_solution(int w, int h, const char *walls) {
+int check_solution(int w, int h, const char *walls, bool *errors) {
     
     int i,j;
     int *dsf;
@@ -389,7 +387,10 @@ int check_solution(int w, int h, const char *walls) {
     dsf = snewn(w*h,int);
     dsf_init(dsf, w*h);
     
-    for (i=0;i<ws;i++) twalls[i] = walls[i];
+    for (i=0;i<ws;i++) {
+		twalls[i] = walls[i];
+		if (errors != NULL) errors[i] = FALSE;
+	}
     
     for (i=0;i<w*h;i++) {
         char edges[4];
@@ -435,7 +436,21 @@ int check_solution(int w, int h, const char *walls) {
             }            
         }
         if (freecount > 0) free_cells = TRUE;
-        if ((wallcount > 2) || (linecount > 2)) invalid_cells = TRUE;
+        if ((wallcount > 2) || (linecount > 2)) {
+			invalid_cells = TRUE;
+			if (errors != NULL && linecount > 2) {
+				if (edges[0] == TC_CON) errors[grid_to_wall(i,w,h,L)] = TRUE;
+				if (edges[1] == TC_CON) errors[grid_to_wall(i,w,h,R)] = TRUE;
+				if (edges[2] == TC_CON) errors[grid_to_wall(i,w,h,U)] = TRUE;
+				if (edges[3] == TC_CON) errors[grid_to_wall(i,w,h,D)] = TRUE;				
+			}
+			if (errors != NULL && wallcount > 2) {
+				if (edges[0] == TC_DIS) errors[grid_to_wall(i,w,h,L)] = TRUE;
+				if (edges[1] == TC_DIS) errors[grid_to_wall(i,w,h,R)] = TRUE;
+				if (edges[2] == TC_DIS) errors[grid_to_wall(i,w,h,U)] = TRUE;
+				if (edges[3] == TC_DIS) errors[grid_to_wall(i,w,h,D)] = TRUE;				
+			}
+		}
         
 		if (linecount < 3) {
 			if ((edges[0] != TC_DIS) && (x > 0))   dsf_merge(dsf, i, i-1);
@@ -480,7 +495,7 @@ bool solve_single_cells(int w, int h, char *walls) {
     int i;
     bool ret = FALSE;
    
-    if (check_solution(w,h,walls) == INVALID) return FALSE;
+    if (check_solution(w,h,walls,NULL) == INVALID) return FALSE;
     
     for (i=0;i<w*h;i++) {
         char edges[4];
@@ -541,7 +556,7 @@ bool solve_check_loops(int w, int h, char *walls) {
             for (j=0;j<ws;j++) testwalls[j] = walls[j];
 			testwalls[i] = TC_DIS;
 			while (solve_single_cells(w,h,testwalls)) {}
-			if (check_solution(w,h,testwalls) == INVALID) {
+			if (check_solution(w,h,testwalls,NULL) == INVALID) {
 				walls[i] = TC_CON;
 				sfree(testwalls);
 				return TRUE;				
@@ -549,7 +564,7 @@ bool solve_check_loops(int w, int h, char *walls) {
             for (j=0;j<ws;j++) testwalls[j] = walls[j];
 			testwalls[i] = TC_CON;
 			while (solve_single_cells(w,h,testwalls)) {}
-			if (check_solution(w,h,testwalls) == INVALID) {
+			if (check_solution(w,h,testwalls,NULL) == INVALID) {
 				walls[i] = TC_DIS;
 				sfree(testwalls);
 				return TRUE;				
@@ -573,7 +588,7 @@ int walls_solve(int w, int h, char *walls, int diff) {
         break;
     }
 
-	return check_solution(w,h,walls);
+	return check_solution(w,h,walls,NULL);
 }
 
 /*
@@ -1004,6 +1019,8 @@ static game_state *execute_move(const game_state *state, const char *move) {
             goto badmove;
     }
 
+	check_solution(ret->shared->w, ret->shared->h, ret->walls, ret->errors);
+
     return ret;
 
 badmove:
@@ -1098,7 +1115,19 @@ static void draw_square(drawing *dr, game_drawstate *ds, const game_ui *ui, int 
     int x = i % (state->shared->w);
     int y = i / (state->shared->w);
     int width = ds->tilesize/6;
+ 
+	char wallleft  = state->walls[grid_to_wall(i,state->shared->w,state->shared->h,L)];
+	char wallright = state->walls[grid_to_wall(i,state->shared->w,state->shared->h,R)];
+	char wallup    = state->walls[grid_to_wall(i,state->shared->w,state->shared->h,U)];
+	char walldown  = state->walls[grid_to_wall(i,state->shared->w,state->shared->h,D)];
+	
+ 	bool errorleft  = state->errors[grid_to_wall(i,state->shared->w,state->shared->h,L)];
+	bool errorright = state->errors[grid_to_wall(i,state->shared->w,state->shared->h,R)];
+	bool errorup    = state->errors[grid_to_wall(i,state->shared->w,state->shared->h,U)];
+	bool errordown  = state->errors[grid_to_wall(i,state->shared->w,state->shared->h,D)];
+
     int parity = (x % 2 == 0);
+
     if (y % 2 == 0) parity = !parity;
  
     draw_rect(dr, COORD(x), COORD(y), ds->tilesize, ds->tilesize, parity ? COL_FLOOR_A : COL_FLOOR_B);
@@ -1108,16 +1137,15 @@ static void draw_square(drawing *dr, game_drawstate *ds, const game_ui *ui, int 
     draw_vertical_dotted_line(  dr, COORD(y), COORD(y+1), COORD(x), COL_GRID);
     draw_vertical_dotted_line(  dr, COORD(y), COORD(y+1), COORD(x+1), COL_GRID);
  
-    if (state->walls[grid_to_wall(i,state->shared->w,state->shared->h,L)] == TC_CON)
-        draw_rect(dr, COORD(x), COORD(y)+(ds->tilesize/2)-width/2, ds->tilesize/2 + width/2, width, COL_DRAGLINE); 
-    if (state->walls[grid_to_wall(i,state->shared->w,state->shared->h,R)] == TC_CON)
-        draw_rect(dr, COORD(x)+(ds->tilesize/2)-width/2, COORD(y)+(ds->tilesize/2)-width/2, ds->tilesize/2 + width/2 + 1, width, COL_DRAGLINE); 
-    if (state->walls[grid_to_wall(i,state->shared->w,state->shared->h,U)] == TC_CON)
-        draw_rect(dr, COORD(x)+(ds->tilesize/2)-width/2, COORD(y), width, ds->tilesize/2 + width/2, COL_DRAGLINE); 
-    if (state->walls[grid_to_wall(i,state->shared->w,state->shared->h,D)] == TC_CON)
-        draw_rect(dr, COORD(x)+(ds->tilesize/2)-width/2, COORD(y)+(ds->tilesize/2)-width/2, width, ds->tilesize/2 + width/2 + 1, COL_DRAGLINE); 
- 
- 
+    if ( wallleft == TC_CON)
+        draw_rect(dr, COORD(x), COORD(y)+(ds->tilesize/2)-width/2, ds->tilesize/2 + width/2, width, errorleft ? COL_ERROR : COL_DRAGLINE); 
+    if (wallright == TC_CON)
+        draw_rect(dr, COORD(x)+(ds->tilesize/2)-width/2, COORD(y)+(ds->tilesize/2)-width/2, ds->tilesize/2 + width/2 + 1, width, errorright ? COL_ERROR : COL_DRAGLINE); 
+    if (wallup == TC_CON)
+        draw_rect(dr, COORD(x)+(ds->tilesize/2)-width/2, COORD(y), width, ds->tilesize/2 + width/2, errorup ? COL_ERROR : COL_DRAGLINE); 
+    if (walldown == TC_CON)
+        draw_rect(dr, COORD(x)+(ds->tilesize/2)-width/2, COORD(y)+(ds->tilesize/2)-width/2, width, ds->tilesize/2 + width/2 + 1, errordown ? COL_ERROR :  COL_DRAGLINE); 
+  
     return;
 }
 
@@ -1130,10 +1158,10 @@ static void draw_wall_outline(drawing *dr, game_drawstate *ds, const game_ui *ui
     int width = ds->tilesize/16;
 
     if (i < ws) {
-        draw_rect(dr, COORD(x)-width/2, COORD(y)-width/2, width, ds->tilesize + width, state->shared->fixed[i] ? COL_FIXED : COL_WALL);
+        draw_rect(dr, COORD(x)-width/2, COORD(y)-width/2, width, ds->tilesize + width, state->shared->fixed[i] ? COL_FIXED : (state->errors[i] ? COL_ERROR : COL_WALL));
     }
     else {
-        draw_rect(dr, COORD(x)-width/2, COORD(y)-width/2, ds->tilesize + width, width, state->shared->fixed[i] ? COL_FIXED : COL_WALL);
+        draw_rect(dr, COORD(x)-width/2, COORD(y)-width/2, ds->tilesize + width, width, state->shared->fixed[i] ? COL_FIXED : (state->errors[i] ? COL_ERROR : COL_WALL));
     }
     
     return;
@@ -1343,16 +1371,16 @@ int main(int argc, char **argv) {
     walls = snewn(((p->w)+1)*(p->h) + (p->w)*((p->h)+1), char);
     
     parse_board(p->w,p->h,walls, board1);    
-    assert(check_solution(p->w,p->h,walls) == AMBIGUOUS);
+    assert(check_solution(p->w,p->h,walls,NULL) == AMBIGUOUS);
     
     parse_board(p->w,p->h,walls, board2);    
-    assert(check_solution(p->w,p->h,walls) == INVALID);
+    assert(check_solution(p->w,p->h,walls,NULL) == INVALID);
     
     parse_board(p->w,p->h,walls, board3);    
-    assert(check_solution(p->w,p->h,walls) == SOLVED);
+    assert(check_solution(p->w,p->h,walls,NULL) == SOLVED);
     
     parse_board(p->w,p->h,walls, board4);    
-    assert(check_solution(p->w,p->h,walls) == INVALID);
+    assert(check_solution(p->w,p->h,walls,NULL) == INVALID);
     
     sfree(walls);
     random_free(rs);
