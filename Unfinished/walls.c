@@ -63,8 +63,11 @@ enum {
     COL_LINE,
     COL_DRAGLINE,
     COL_ERROR,
+    COL_FLASH,
     NCOLOURS
 };
+
+#define FLASH_TIME 0.7F
 
 enum {
     TC_CON,
@@ -92,8 +95,12 @@ struct game_state {
 
 #define DEFAULT_PRESET 0
 static const struct game_params walls_presets[] = {
-    {5, 4,      DIFF_EASY},
-    {4, 5,      DIFF_EASY},
+    {4, 4,  DIFF_EASY},
+    {4, 4,  DIFF_NORMAL},
+    {6, 6,  DIFF_NORMAL},
+    {6, 6,  DIFF_TRICKY},
+    {8, 8,  DIFF_NORMAL},
+    {8, 8,  DIFF_TRICKY}    
 };
 
 static game_params *default_params(void) {
@@ -204,8 +211,8 @@ static game_params *custom_params(const config_item *cfg) {
 }
 
 static char *validate_params(const game_params *params, int full) {
-    if (params->w < 2) return "Width must be at least three";
-    if (params->h < 2) return "Height must be at least three";
+    if (params->w < 3) return "Width must be at least three";
+    if (params->h < 3) return "Height must be at least three";
     if (params->difficulty < 0 || params->difficulty >= DIFFCOUNT)
         return "Unknown difficulty level";
     return NULL;
@@ -368,6 +375,20 @@ int wall_to_grid(int wall, int w, int h, int dir) {
     return grid;
 }
 
+bool is_border_wall(int wall, int w, int h) {
+	
+	int ws = (w+1)*h;
+	int x = wall % (w+1);
+	int y = (wall - ws) / (w);
+	
+	if (wall < ws && x == 0) return TRUE;
+	if (wall < ws && x == w) return TRUE;
+	if (wall >= ws && y == 0) return TRUE;
+	if (wall >= ws && y == h) return TRUE;
+	
+	return FALSE;
+}
+
 int check_solution(int w, int h, const char *walls, bool *errors) {
     
     int i,j;
@@ -395,15 +416,19 @@ int check_solution(int w, int h, const char *walls, bool *errors) {
     for (i=0;i<w*h;i++) {
         char edges[4];
         int linecount = 0;
-
+		int wallcount = 0;
+		
         edges[0] = twalls[grid_to_wall(i,w,h,L)];
         edges[1] = twalls[grid_to_wall(i,w,h,R)];
         edges[2] = twalls[grid_to_wall(i,w,h,U)];
         edges[3] = twalls[grid_to_wall(i,w,h,D)];
 
-        for (j=0;j<4;j++)
-			if (edges[j] == TC_CON) 
-				linecount++;
+        for (j=0;j<4;j++) {
+			if (edges[j] == TC_CON) linecount++;
+			if (edges[j] == TC_DIS) wallcount++;
+		}
+
+		if (errors == NULL && (linecount > 2 || wallcount > 2)) goto invalid;
 
 		if (linecount == 2) {
 			if (edges[0] != TC_CON) twalls[grid_to_wall(i,w,h,L)] = TC_DIS;
@@ -438,17 +463,13 @@ int check_solution(int w, int h, const char *walls, bool *errors) {
         if (freecount > 0) free_cells = TRUE;
         if ((wallcount > 2) || (linecount > 2)) {
 			invalid_cells = TRUE;
+			if (errors == NULL) goto invalid;
+			
 			if (errors != NULL && linecount > 2) {
 				if (edges[0] == TC_CON) errors[grid_to_wall(i,w,h,L)] = TRUE;
 				if (edges[1] == TC_CON) errors[grid_to_wall(i,w,h,R)] = TRUE;
 				if (edges[2] == TC_CON) errors[grid_to_wall(i,w,h,U)] = TRUE;
 				if (edges[3] == TC_CON) errors[grid_to_wall(i,w,h,D)] = TRUE;				
-			}
-			if (errors != NULL && wallcount > 2) {
-				if (edges[0] == TC_DIS) errors[grid_to_wall(i,w,h,L)] = TRUE;
-				if (edges[1] == TC_DIS) errors[grid_to_wall(i,w,h,R)] = TRUE;
-				if (edges[2] == TC_DIS) errors[grid_to_wall(i,w,h,U)] = TRUE;
-				if (edges[3] == TC_DIS) errors[grid_to_wall(i,w,h,D)] = TRUE;				
 			}
 		}
         
@@ -463,7 +484,11 @@ int check_solution(int w, int h, const char *walls, bool *errors) {
             ((edges[1] == TC_CON) && (x == w-1)) ||
             ((edges[2] == TC_CON) && (y == 0))   || 
             ((edges[3] == TC_CON) && (y == h-1))) {
-            if (exit2 != -1) surplus_exits = TRUE;
+            if (exit2 != -1) { 
+				surplus_exits = TRUE;
+				if (errors == NULL) goto invalid;
+			}
+				
             if (exit1 != -1) exit2 = i; else exit1 = i;
         }
     
@@ -488,15 +513,18 @@ int check_solution(int w, int h, const char *walls, bool *errors) {
 	if (!correct_exits) return INVALID;
 	
 	return SOLVED;
+	
+invalid:
+	sfree(twalls);
+	sfree(dsf);
+	return INVALID;
 }
 
 bool solve_single_cells(int w, int h, char *walls) {
   
     int i;
     bool ret = FALSE;
-   
-    if (check_solution(w,h,walls,NULL) == INVALID) return FALSE;
-    
+       
     for (i=0;i<w*h;i++) {
         char edges[4];
         int wallcount = 0;
@@ -519,33 +547,28 @@ bool solve_single_cells(int w, int h, char *walls) {
             if (edges[j] == TC_UNK) freecount++;
         }
         
-        if ((wallcount > 2) || (pathcount > 2)) {
-            printf("Illegal counts of %i/%i/%i at %i\n",wallcount,pathcount,freecount,i);
-            print_grid(w,h,walls);
-        }
-        
-        assert((wallcount <=2) && (pathcount <= 2));
+        if ((wallcount > 2) || (pathcount > 2)) return FALSE;
         
         if (wallcount == 2 && freecount > 0) {
             if (walls[tr] == TC_UNK) walls[tr] = TC_CON;
             if (walls[tu] == TC_UNK) walls[tu] = TC_CON;
             if (walls[tl] == TC_UNK) walls[tl] = TC_CON;
             if (walls[td] == TC_UNK) walls[td] = TC_CON;
-            return TRUE;
+            ret = TRUE;
         }
         else if (pathcount == 2 && freecount > 0) {
             if (walls[tr] == TC_UNK) walls[tr] = TC_DIS;
             if (walls[tu] == TC_UNK) walls[tu] = TC_DIS;
             if (walls[tl] == TC_UNK) walls[tl] = TC_DIS;
             if (walls[td] == TC_UNK) walls[td] = TC_DIS;
-            return TRUE;
+            ret = TRUE;
         }
     }
     
     return ret;
 }
 
-bool solve_check_loops(int w, int h, char *walls) {
+bool solve_check_loops(int w, int h, int diff, char *walls) {
   
     int i,j;
     int ws = (w+1)*h+w*(h+1);
@@ -555,7 +578,12 @@ bool solve_check_loops(int w, int h, char *walls) {
 		if (walls[i] == TC_UNK) {
             for (j=0;j<ws;j++) testwalls[j] = walls[j];
 			testwalls[i] = TC_DIS;
-			while (solve_single_cells(w,h,testwalls)) {}
+			if (diff < DIFF_TRICKY)
+				for (j=0;j<2;j++) {
+					if (solve_single_cells(w,h,testwalls)) break;
+				}
+			else
+				while (solve_single_cells(w,h,testwalls)) {}
 			if (check_solution(w,h,testwalls,NULL) == INVALID) {
 				walls[i] = TC_CON;
 				sfree(testwalls);
@@ -563,7 +591,12 @@ bool solve_check_loops(int w, int h, char *walls) {
 			}
             for (j=0;j<ws;j++) testwalls[j] = walls[j];
 			testwalls[i] = TC_CON;
-			while (solve_single_cells(w,h,testwalls)) {}
+			if (diff < DIFF_TRICKY)
+				for (j=0;j<2;j++) {
+					if (solve_single_cells(w,h,testwalls)) break;
+				}
+			else
+				while (solve_single_cells(w,h,testwalls)) {}
 			if (check_solution(w,h,testwalls,NULL) == INVALID) {
 				walls[i] = TC_DIS;
 				sfree(testwalls);
@@ -583,7 +616,7 @@ int walls_solve(int w, int h, char *walls, int diff) {
         if (solve_single_cells(w, h, walls)) continue;
 		if (diff == DIFF_EASY) break;
 		
-        if (solve_check_loops(w, h, walls)) continue; 
+        if (solve_check_loops(w, h, diff, walls)) continue; 
  
         break;
     }
@@ -734,48 +767,93 @@ static char *validate_desc(const game_params *params, const char *desc);
 
 static char *new_game_desc(const game_params *params, random_state *rs,
                            char **aux, int interactive) {
-    int i;
+    int i,j;
     game_state *new;
     char *desc, *e;
 	int erun, wrun;
-    int *wallindices;
+	int *wallindices;
     int wallnum;
+	int *gridindices;
+	int gridnum;
+	int *borderindices;
+	int bordernum;
+	int borderreduce;
+	
 	char *twalls;
 	
     int ws = (params->w + 1) * params->h + params->w * (params->h + 1);
     int w = params->w;
 	int h = params->h;
+    int difficulty = params->difficulty;
     
-    new = new_state(params);
-    generate_hamiltonian_path(new, rs);
-  
-    /*
-     * Remove as many walls as possible while retaining solubility.
-     */
+    if (difficulty == DIFF_HARD) difficulty = DIFF_TRICKY; /* Hard not implemented yet */
+    if (w == 3 && h == 3 && difficulty >= DIFF_TRICKY) difficulty = DIFF_NORMAL;
+    
+	wallindices = snewn(ws, int);
+	gridindices = snewn(ws, int);
+	borderindices = snewn(ws, int);
 
-    wallindices = snewn(ws, int);
-    wallnum = 0;
-    for (i=0;i<ws;i++) {
-        if (new->walls[i] == TC_DIS) {
-            wallindices[wallnum++] = i;
-        }        
-    }
-    shuffle(wallindices, wallnum, sizeof(int), rs);
- 
 	twalls = snewn(ws, char);
-    for (i=0;i<wallnum;i++) {
-        int j;
-        int index = wallindices[i];
+
+    while(TRUE) {
+    
+		new = new_state(params);
+		generate_hamiltonian_path(new, rs);
+    
+	   /*
+		* Remove as many walls as possible while retaining solubility.
+		*/
+  
+		wallnum = gridnum = bordernum = 0;
+		for (i=0;i<ws;i++) { 		
+			if (new->walls[i] == TC_DIS) {
+				if (is_border_wall(i, w, h))
+					borderindices[bordernum++] = i;
+				else
+					gridindices[gridnum++] = i;
+			}        
+		}
+
+		shuffle(borderindices, bordernum, sizeof(int), rs);
+	
+		borderreduce = 0;
+		if (params->difficulty == DIFF_EASY) borderreduce = random_upto(rs,bordernum/4);
+		if (params->difficulty == DIFF_NORMAL) borderreduce = random_upto(rs,bordernum/2);
+		if (params->difficulty == DIFF_TRICKY) borderreduce = random_upto(rs,bordernum);
+		if (params->difficulty == DIFF_HARD) borderreduce = bordernum;
+		
+		for (i=0;i<gridnum;i++) wallindices[wallnum++] = gridindices[i];
+		for (i=0;i<borderreduce;i++) wallindices[wallnum++] = borderindices[i];
+
+		shuffle(wallindices, wallnum, sizeof(int), rs);
+
+		for (i=0;i<wallnum;i++) {
+			int index = wallindices[i];
+			for (j=0;j<ws;j++) twalls[j] = new->walls[j];
+			twalls[index] = TC_UNK;
+			if (walls_solve(w, h, twalls, difficulty) == SOLVED) {
+				new->walls[index] = TC_UNK;
+			}
+		}
 		for (j=0;j<ws;j++) twalls[j] = new->walls[j];
-        twalls[index] = TC_UNK;
-        if (walls_solve(w, h, twalls, params->difficulty) == SOLVED) {
-            new->walls[index] = TC_UNK;
-        }
-    }
+		if (walls_solve(w, h, twalls, difficulty) != SOLVED) {
+			free_game(new);
+			continue;
+		}
+		if (difficulty == DIFF_EASY) break;
+		for (j=0;j<ws;j++) twalls[j] = new->walls[j];
+		if (walls_solve(w, h, twalls, difficulty-1) == SOLVED) {
+			free_game(new);
+			continue;
+		}
+		break;
+	}
+
     sfree(twalls);
     sfree(wallindices);
-    sfree(game_text_format(new)); printf("\n");
-
+    sfree(gridindices);
+    sfree(borderindices);
+    
     /* We have a valid puzzle! */
     
     /* Encode walls */
@@ -1019,7 +1097,8 @@ static game_state *execute_move(const game_state *state, const char *move) {
             goto badmove;
     }
 
-	check_solution(ret->shared->w, ret->shared->h, ret->walls, ret->errors);
+	if (check_solution(ret->shared->w, ret->shared->h, ret->walls, ret->errors) == SOLVED)
+		ret->completed = TRUE;
 
     return ret;
 
@@ -1065,9 +1144,9 @@ static float *game_colours(frontend *fe, int *ncolours) {
     ret[COL_FIXED * 3 + 1] = 0.1F;
     ret[COL_FIXED * 3 + 2] = 0.1F;
 
-    ret[COL_WALL * 3 + 0] = 0.5F;
-    ret[COL_WALL * 3 + 1] = 0.5F;
-    ret[COL_WALL * 3 + 2] = 0.5F;
+    ret[COL_WALL * 3 + 0] = 0.0F;
+    ret[COL_WALL * 3 + 1] = 0.0F;
+    ret[COL_WALL * 3 + 2] = 0.8F;
 
     ret[COL_GRID * 3 + 0] = 0.0F;
     ret[COL_GRID * 3 + 1] = 0.0F;
@@ -1085,7 +1164,11 @@ static float *game_colours(frontend *fe, int *ncolours) {
     ret[COL_ERROR * 3 + 1] = 0.0F;
     ret[COL_ERROR * 3 + 2] = 0.0F;
 
-    *ncolours = NCOLOURS;
+    ret[COL_FLASH * 3 + 0] = 1.0F;
+    ret[COL_FLASH * 3 + 1] = 1.0F;
+    ret[COL_FLASH * 3 + 2] = 1.0F;
+
+	*ncolours = NCOLOURS;
     return ret;
 }
 
@@ -1111,7 +1194,49 @@ static void draw_vertical_dotted_line(drawing *dr, int y1, int y2, int x, int co
     for (i=y1;i<y2;i+=4) draw_line(dr, x, i, x, i+1, colour);
 }
 
-static void draw_square(drawing *dr, game_drawstate *ds, const game_ui *ui, int i, const game_state *state) {
+static void draw_border_square(drawing *dr, game_drawstate *ds, const game_ui *ui, int i, const game_state *state, bool flash) {
+	char pos;
+	int width = ds->tilesize/6;
+	int w = state->shared->w;
+	int h = state->shared->h;
+	
+	if (i < w) pos = U;
+	else if (i < 2*w) pos = D;
+	else if (i < 2*w + h) pos = L;
+	else pos = R;
+	
+	if (pos == U) {
+		int x = i ;
+		draw_rect(dr, COORD(x), COORD(0) - ds->tilesize/2, ds->tilesize, ds->tilesize/2, COL_BACKGROUND);
+		if (state->walls[x + (w+1)*h ] == TC_CON)
+			draw_rect(dr, COORD(x)+(ds->tilesize/2)-width/2, COORD(0)-(ds->tilesize/3), width, ds->tilesize/3,
+			state->errors[x + (w+1)*h] ? COL_ERROR : flash ? COL_FLASH : COL_DRAGLINE);
+	}
+	if (pos == D) {
+		int x = i - w;
+		draw_rect(dr, COORD(x), COORD(h)+1, ds->tilesize, ds->tilesize/2, COL_BACKGROUND);
+		if (state->walls[x + (w+1)*h + w*h ] == TC_CON)
+			draw_rect(dr, COORD(x)+(ds->tilesize/2)-width/2, COORD(h), width, ds->tilesize/3,
+			state->errors[x + (w+1)*h + w*h] ? COL_ERROR : flash ? COL_FLASH : COL_DRAGLINE);
+	}
+	if (pos == L) {
+		int y = (i - 2*w);
+		draw_rect(dr, COORD(0) - ds->tilesize/2, COORD(y), ds->tilesize/2, ds->tilesize, COL_BACKGROUND);
+		if (state->walls[y * (w+1)] == TC_CON)
+			draw_rect(dr, COORD(0)-(ds->tilesize/3), COORD(y)+(ds->tilesize/2)-width/2, ds->tilesize/3, width,
+			state->errors[y * (w+1)] ? COL_ERROR : flash ? COL_FLASH : COL_DRAGLINE);
+	}
+	if (pos == R) {
+		int y = (i - (2*w+ h));
+		draw_rect(dr, COORD(w)+1, COORD(y), ds->tilesize/2, ds->tilesize, COL_BACKGROUND);
+		if (state->walls[y*(w+1) + w] == TC_CON)
+			draw_rect(dr, COORD(w)+1, COORD(y)+(ds->tilesize/2)-width/2, ds->tilesize/3, width,
+			state->errors[y * (w+1)] ? COL_ERROR : flash ? COL_FLASH : COL_DRAGLINE);
+	}
+	
+}
+
+static void draw_square(drawing *dr, game_drawstate *ds, const game_ui *ui, int i, const game_state *state, bool flash) {
     int x = i % (state->shared->w);
     int y = i / (state->shared->w);
     int width = ds->tilesize/6;
@@ -1130,21 +1255,25 @@ static void draw_square(drawing *dr, game_drawstate *ds, const game_ui *ui, int 
 
     if (y % 2 == 0) parity = !parity;
  
-    draw_rect(dr, COORD(x), COORD(y), ds->tilesize, ds->tilesize, parity ? COL_FLOOR_A : COL_FLOOR_B);
+    draw_rect(dr, COORD(x), COORD(y), ds->tilesize+1, ds->tilesize+1, parity ? COL_FLOOR_A : COL_FLOOR_B);
 
     draw_horizontal_dotted_line(dr, COORD(x), COORD(x+1), COORD(y), COL_GRID);
     draw_horizontal_dotted_line(dr, COORD(x), COORD(x+1), COORD(y+1), COL_GRID);
     draw_vertical_dotted_line(  dr, COORD(y), COORD(y+1), COORD(x), COL_GRID);
     draw_vertical_dotted_line(  dr, COORD(y), COORD(y+1), COORD(x+1), COL_GRID);
  
-    if ( wallleft == TC_CON)
-        draw_rect(dr, COORD(x), COORD(y)+(ds->tilesize/2)-width/2, ds->tilesize/2 + width/2, width, errorleft ? COL_ERROR : COL_DRAGLINE); 
+    if (wallleft == TC_CON)
+        draw_rect(dr, COORD(x), COORD(y)+(ds->tilesize/2)-width/2, ds->tilesize/2 + width/2, width, 
+                  errorleft ? COL_ERROR : flash ? COL_FLASH : COL_DRAGLINE); 
     if (wallright == TC_CON)
-        draw_rect(dr, COORD(x)+(ds->tilesize/2)-width/2, COORD(y)+(ds->tilesize/2)-width/2, ds->tilesize/2 + width/2 + 1, width, errorright ? COL_ERROR : COL_DRAGLINE); 
+        draw_rect(dr, COORD(x)+(ds->tilesize/2)-width/2, COORD(y)+(ds->tilesize/2)-width/2, ds->tilesize/2 + width/2 + 1, width, 
+                  errorright ? COL_ERROR : flash ? COL_FLASH : COL_DRAGLINE); 
     if (wallup == TC_CON)
-        draw_rect(dr, COORD(x)+(ds->tilesize/2)-width/2, COORD(y), width, ds->tilesize/2 + width/2, errorup ? COL_ERROR : COL_DRAGLINE); 
+        draw_rect(dr, COORD(x)+(ds->tilesize/2)-width/2, COORD(y), width, ds->tilesize/2 + width/2, 
+                  errorup ? COL_ERROR : flash ? COL_FLASH : COL_DRAGLINE); 
     if (walldown == TC_CON)
-        draw_rect(dr, COORD(x)+(ds->tilesize/2)-width/2, COORD(y)+(ds->tilesize/2)-width/2, width, ds->tilesize/2 + width/2 + 1, errordown ? COL_ERROR :  COL_DRAGLINE); 
+        draw_rect(dr, COORD(x)+(ds->tilesize/2)-width/2, COORD(y)+(ds->tilesize/2)-width/2, width, ds->tilesize/2 + width/2 + 1, 
+                  errordown ? COL_ERROR : flash ? COL_FLASH : COL_DRAGLINE); 
   
     return;
 }
@@ -1155,13 +1284,15 @@ static void draw_wall_outline(drawing *dr, game_drawstate *ds, const game_ui *ui
     int ws = (w+1)*h;
     int x = (i < ws) ? i % (w+1) : (i-ws) % w;
     int y = (i < ws) ? i / (w+1) : (i-ws) / w;
-    int width = ds->tilesize/16;
+    int width = ds->tilesize/12;
 
     if (i < ws) {
-        draw_rect(dr, COORD(x)-width/2, COORD(y)-width/2, width, ds->tilesize + width, state->shared->fixed[i] ? COL_FIXED : (state->errors[i] ? COL_ERROR : COL_WALL));
+        draw_rect(dr, COORD(x)-width/2, COORD(y)-width/2, width, ds->tilesize + width, 
+          state->shared->fixed[i] ? COL_FIXED : (state->errors[i] ? COL_ERROR : COL_WALL));
     }
     else {
-        draw_rect(dr, COORD(x)-width/2, COORD(y)-width/2, ds->tilesize + width, width, state->shared->fixed[i] ? COL_FIXED : (state->errors[i] ? COL_ERROR : COL_WALL));
+        draw_rect(dr, COORD(x)-width/2, COORD(y)-width/2, ds->tilesize + width, width, 
+          state->shared->fixed[i] ? COL_FIXED : (state->errors[i] ? COL_ERROR : COL_WALL));
     }
     
     return;
@@ -1173,6 +1304,7 @@ static void game_redraw(drawing *dr, game_drawstate *ds,
                         float animtime, float flashtime) {
     int w = state->shared->w, h = state->shared->h;
     int i;
+    bool flash = (bool)(flashtime * 5 / FLASH_TIME) % 2;   
     
     if (!ds->started) {
         draw_rect(dr, 0, 0, w*TILESIZE + 2*BORDER, h*TILESIZE + 2*BORDER,
@@ -1182,7 +1314,10 @@ static void game_redraw(drawing *dr, game_drawstate *ds,
 
 
     for (i=0;i<state->shared->wh;i++)
-        draw_square(dr, ds, ui, i, state);
+        draw_square(dr, ds, ui, i, state, flash);
+
+	for (i=0;i<(2*w+2*h);i++)
+		draw_border_square(dr, ds, ui, i, state, flash);
 
     for (i=0;i<state->shared->nw;i++)
         if (state->walls[i] == TC_DIS && !state->shared->fixed[i])
@@ -1204,7 +1339,11 @@ static float game_anim_length(const game_state *oldstate,
 
 static float game_flash_length(const game_state *oldstate,
                                const game_state *newstate, int dir, game_ui *ui) {
-    return 0.0F;
+    if (!oldstate->completed && newstate->completed &&
+        !oldstate->used_solve && !newstate->used_solve)
+        return FLASH_TIME;
+    else
+        return 0.0F;
 }
 
 static int game_status(const game_state *state) {
@@ -1383,6 +1522,22 @@ int main(int argc, char **argv) {
     assert(check_solution(p->w,p->h,walls,NULL) == INVALID);
     
     sfree(walls);
+    
+    assert(is_border_wall(0, 3, 4) == TRUE);
+    assert(is_border_wall(1, 3, 4) == FALSE);
+    assert(is_border_wall(3, 3, 4) == TRUE);
+    assert(is_border_wall(12, 3, 4) == TRUE);
+    assert(is_border_wall(14, 3, 4) == FALSE);
+    assert(is_border_wall(15, 3, 4) == TRUE);
+    assert(is_border_wall(16, 3, 4) == TRUE);
+    assert(is_border_wall(17, 3, 4) == TRUE);
+    assert(is_border_wall(19, 3, 4) == FALSE);
+    assert(is_border_wall(27, 3, 4) == FALSE);
+    assert(is_border_wall(28, 3, 4) == TRUE);
+    assert(is_border_wall(30, 3, 4) == TRUE);
+
+    
+    
     random_free(rs);
     free_params(p);
     return 0;
