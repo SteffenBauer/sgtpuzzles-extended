@@ -93,14 +93,18 @@ struct game_state {
     int completed, used_solve;
 };
 
-#define DEFAULT_PRESET 0
+#define DEFAULT_PRESET 2
 static const struct game_params walls_presets[] = {
-    {4, 4,  DIFF_EASY},
-    {4, 4,  DIFF_NORMAL},
-    {6, 6,  DIFF_NORMAL},
-    {6, 6,  DIFF_TRICKY},
-    {8, 8,  DIFF_NORMAL},
-    {8, 8,  DIFF_TRICKY}    
+    {4, 5,  DIFF_EASY},
+    {4, 5,  DIFF_NORMAL},
+    {5, 7,  DIFF_NORMAL},
+    {5, 7,  DIFF_TRICKY},
+    {6, 8,  DIFF_NORMAL},
+    {6, 8,  DIFF_TRICKY},
+    {7, 9,  DIFF_NORMAL},
+    {7, 9,  DIFF_TRICKY},
+    {8, 10,  DIFF_NORMAL},
+    {8, 10,  DIFF_TRICKY}
 };
 
 static game_params *default_params(void) {
@@ -389,7 +393,7 @@ bool is_border_wall(int wall, int w, int h) {
 	return FALSE;
 }
 
-int check_solution(int w, int h, const char *walls, bool *errors) {
+int walls_check_solution(int w, int h, const char *walls, bool *errors) {
     
     int i,j;
     int *dsf;
@@ -584,7 +588,7 @@ bool solve_check_loops(int w, int h, int diff, char *walls) {
 				}
 			else
 				while (solve_single_cells(w,h,testwalls)) {}
-			if (check_solution(w,h,testwalls,NULL) == INVALID) {
+			if (walls_check_solution(w,h,testwalls,NULL) == INVALID) {
 				walls[i] = TC_CON;
 				sfree(testwalls);
 				return TRUE;				
@@ -597,7 +601,7 @@ bool solve_check_loops(int w, int h, int diff, char *walls) {
 				}
 			else
 				while (solve_single_cells(w,h,testwalls)) {}
-			if (check_solution(w,h,testwalls,NULL) == INVALID) {
+			if (walls_check_solution(w,h,testwalls,NULL) == INVALID) {
 				walls[i] = TC_DIS;
 				sfree(testwalls);
 				return TRUE;				
@@ -621,7 +625,7 @@ int walls_solve(int w, int h, char *walls, int diff) {
         break;
     }
 
-	return check_solution(w,h,walls,NULL);
+	return walls_check_solution(w,h,walls,NULL);
 }
 
 /*
@@ -997,12 +1001,18 @@ static char *game_text_format(const game_state *state) {
     return ret;
 }
 
+struct game_ui {
+};
+
 static game_ui *new_ui(const game_state *state) {
-    return NULL;
+    game_ui *ret = snew(game_ui);
+    return ret;
 }
 
 static void free_ui(game_ui *ui) {
+    sfree(ui);
 }
+
 
 static char *encode_ui(const game_ui *ui) {
     return NULL;
@@ -1097,7 +1107,7 @@ static game_state *execute_move(const game_state *state, const char *move) {
             goto badmove;
     }
 
-	if (check_solution(ret->shared->w, ret->shared->h, ret->walls, ret->errors) == SOLVED)
+	if (walls_check_solution(ret->shared->w, ret->shared->h, ret->walls, ret->errors) == SOLVED)
 		ret->completed = TRUE;
 
     return ret;
@@ -1347,7 +1357,7 @@ static float game_flash_length(const game_state *oldstate,
 }
 
 static int game_status(const game_state *state) {
-    return 0;
+    return state->completed ? +1 : 0;
 }
 
 static int game_timing_state(const game_state *state, game_ui *ui) {
@@ -1432,7 +1442,7 @@ int main(int argc, char **argv) {
 
 #ifdef UNIT_TESTS
 
-/* int check_solution(int w, int h, const char *walls) { */
+/* int walls_check_solution(int w, int h, const char *walls) { */
 
 
 void parse_board(int w, int h, char *walls, const char *board) {
@@ -1510,16 +1520,16 @@ int main(int argc, char **argv) {
     walls = snewn(((p->w)+1)*(p->h) + (p->w)*((p->h)+1), char);
     
     parse_board(p->w,p->h,walls, board1);    
-    assert(check_solution(p->w,p->h,walls,NULL) == AMBIGUOUS);
+    assert(walls_check_solution(p->w,p->h,walls,NULL) == AMBIGUOUS);
     
     parse_board(p->w,p->h,walls, board2);    
-    assert(check_solution(p->w,p->h,walls,NULL) == INVALID);
+    assert(walls_check_solution(p->w,p->h,walls,NULL) == INVALID);
     
     parse_board(p->w,p->h,walls, board3);    
-    assert(check_solution(p->w,p->h,walls,NULL) == SOLVED);
+    assert(walls_check_solution(p->w,p->h,walls,NULL) == SOLVED);
     
     parse_board(p->w,p->h,walls, board4);    
-    assert(check_solution(p->w,p->h,walls,NULL) == INVALID);
+    assert(walls_check_solution(p->w,p->h,walls,NULL) == INVALID);
     
     sfree(walls);
     
