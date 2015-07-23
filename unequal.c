@@ -344,14 +344,15 @@ static int check_num_adj(digit *grid, game_state *state,
         if (state->mode == 2) {
             int gd = abs(n-dn);
             int id = (2*n == dn || 2*dn == n);
-    
+            int ot = (n == 1 && dn == 2) || (n == 2 && dn == 1);
+            
             if ((f & adjthan[i].fd) && !id) {
                 debug(("check_adj error (%d,%d):%d should be @ (%d,%d):%d",
                        x, y, n, x+dx, y+dy, dn));
                 if (me) GRID(state, flags, x, y) |= adjthan[i].fe;
                 ret = 0;                                
             }
-            else if ((f & adjthan[i].f) && (gd != 1)) {
+            else if ((f & adjthan[i].f) && (gd != 1 && !ot)) {
                 debug(("check_adj error (%d,%d):%d should be O (%d,%d):%d",
                        x, y, n, x+dx, y+dy, dn));
                 if (me) GRID(state, flags, x, y) |= adjthan[i].fe;
@@ -732,9 +733,11 @@ static int solver_adjacent(struct latin_solver *solver, void *vctx)
                 for (n = 0; n < o; n++) {
                     /* Continue past numbers the adjacent square _could_ be,
                      * given the clue we have. */
+                    int ot = ( (n+1) == 1 && grid(x,y) == 2) || ( (n+1) == 2 && grid(x,y) == 1);
                     gd = abs((n+1) - grid(x, y));
                     dbl = ( (n+1)*2 == grid(x,y) || (n+1) == 2*grid(x,y) );
                     if (ctx->state->mode == 2) {
+                        if (ot && (isdouble || isadjacent)) continue;
                         if (isdouble && dbl) continue;
                         if (!isdouble && isadjacent && (gd == 1)) continue;
                         if (!isdouble && !isadjacent && !dbl && (gd != 1)) continue;
@@ -795,12 +798,15 @@ static int solver_adjacent_set(struct latin_solver *solver, void *vctx)
                     if (cube(x, y, n+1) == FALSE) continue;
 
                     for (nn = 0; nn < o; nn++) {
+                        int ot;
                         if (n == nn) continue;
 
+                        ot = (nn == 1 && n == 2) || (nn == 2 && n == 1);
                         gd = abs(nn - n);
                         dbl = ( ((nn+1)*2 == (n+1)) || ((nn+1) == 2*(n+1)) );
 
                         if (ctx->state->mode == 2) {
+                            if (ot && !(isdouble || isadjacent)) continue;
                             if (isdouble && !dbl) continue;
                             if (!isdouble && isadjacent && (gd != 1)) continue;
                             if (!isdouble && !isadjacent && (dbl || (gd == 1)) ) continue;
@@ -1131,7 +1137,7 @@ static void game_strip(game_state *new, int *scratch, digit *latin,
 #endif
 }
 
-static void add_kropki_flags(game_state *state, digit *latin)
+static void add_kropki_flags(game_state *state, digit *latin, random_state *rs)
 {
     int x, y, o = state->order;
 
@@ -1146,7 +1152,17 @@ static void add_kropki_flags(game_state *state, digit *latin)
             gi = latin[y*o+x];
             if (x < (o-1)) {
                 gc = latin[y*o+x+1];
-                if ( (2*gi == gc || 2*gc == gi) ) {
+                if ((gi == 1 && gc == 2) || (gi == 2 && gc == 1)) {
+                    if (random_upto(rs, 2) == 0) {
+                        GRID(state, flags, x, y) |= F_DBL_RIGHT;
+                        GRID(state, flags, x+1, y) |= F_DBL_LEFT;
+                    }
+                    else {
+                        GRID(state, flags, x, y) |= F_ADJ_RIGHT;
+                        GRID(state, flags, x+1, y) |= F_ADJ_LEFT;
+                    }
+                }
+                else if ( (2*gi == gc || 2*gc == gi) ) {
                     GRID(state, flags, x, y) |= F_DBL_RIGHT;
                     GRID(state, flags, x+1, y) |= F_DBL_LEFT;
                 }
@@ -1158,7 +1174,17 @@ static void add_kropki_flags(game_state *state, digit *latin)
 
             if (y < (o-1)) {
                 gc = latin[(y+1)*o+x];
-                if ( (2*gi == gc || 2*gc == gi) ) {
+                if ((gi == 1 && gc == 2) || (gi == 2 && gc == 1)) {
+                    if (random_upto(rs, 2) == 0) {
+                        GRID(state, flags, x, y) |= F_DBL_DOWN;
+                        GRID(state, flags, x, y+1) |= F_DBL_UP;
+                    }
+                    else {
+                        GRID(state, flags, x, y) |= F_ADJ_DOWN;
+                        GRID(state, flags, x, y+1) |= F_ADJ_UP;
+                    }
+                }
+                else if ( (2*gi == gc || 2*gc == gi) ) {
                     GRID(state, flags, x, y) |= F_DBL_DOWN;
                     GRID(state, flags, x, y+1) |= F_DBL_UP;
                 }
@@ -1228,7 +1254,7 @@ generate:
     memset(state->flags, 0, o2 * sizeof(unsigned int));
 
     if (state->mode == 2) {
-        add_kropki_flags(state, sq);
+        add_kropki_flags(state, sq, rs);
     }
     else if (state->mode == 1) {
         /* All adjacency flags are always present. */
