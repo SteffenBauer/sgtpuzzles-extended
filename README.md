@@ -22,7 +22,7 @@ Extensions/Modifications I wrote for the famous & excellent [Simon Tathams Porta
 * Unfinished/Stellar: New puzzle "Stellar", implementation of [Sternenhaufen](http://www.janko.at/Raetsel/Sternenhaufen/index.htm)
     * So far playable in difficulty "Normal".
 * Unfinished/Walls: New puzzle "Walls", find a path through a maze of walls
-    * So far very crudely playable in difficulty "Easy". Needs lots of work.
+    * Playable. Needs still lots of work.
 
 ## Usage:
 
@@ -40,7 +40,7 @@ Updated to the current Android sgtpuzzles version (using Android Studio)
 
 ## LICENSE
 
-Copyright (c) 2013-2014 Simon Tatham, Steffen Bauer
+Copyright (c) 2013-2015 Simon Tatham, Steffen Bauer
 
 Portion copyright Richard Boulton, James Harvey, Mike Pinna, Jonas
 K�lker, Dariusz Olszewski, Michael Schierl, Lambros Lambrou, Bernd
