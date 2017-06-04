@@ -2961,11 +2961,46 @@ static int gridgen(int cr, struct block_structure *blocks,
  * End of grid generator code.
  */
 
+static int check_killer_cage_sum(struct block_structure *kblocks,
+                                 digit *kgrid, digit *grid, int blk)
+{
+    /*
+     * Returns: -1 if the cage has any empty square; 0 if all squares
+     * are full but the sum is wrong; +1 if all squares are full and
+     * they have the right sum.
+     *
+     * Does not check uniqueness of numbers within the cage; that's
+     * done elsewhere (because in error highlighting it needs to be
+     * detected separately so as to flag the error in a visually
+     * different way).
+     */
+    int n_squares = kblocks->nr_squares[blk];
+    int sum = 0, clue = 0;
+    int i;
+
+    for (i = 0; i < n_squares; i++) {
+        int xy = kblocks->blocks[blk][i];
+
+        if (grid[xy] == 0)
+            return -1;
+        sum += grid[xy];
+
+        if (kgrid[xy]) {
+            assert(clue == 0);
+            clue = kgrid[xy];
+        }
+    }
+
+    assert(clue != 0);
+    return sum == clue;
+}
+
 /*
  * Check whether a grid contains a valid complete puzzle.
  */
 static int check_valid(int cr, struct block_structure *blocks,
-               struct block_structure *kblocks, int xtype, digit *grid)
+               struct block_structure *kblocks,
+                       digit *kgrid, int xtype, digit *grid)
 {
     unsigned char *used;
     int x, y, i, j, n;
@@ -3020,7 +3055,9 @@ static int check_valid(int cr, struct block_structure *blocks,
 
     /*
      * Check that each Killer cage, if any, contains at most one of
-     * everything.
+     * everything. If we also know the clues for those cages (which we
+     * might not, when this function is called early in puzzle
+     * generation), we also check that they all have the right sum.
      */
     if (kblocks) {
     for (i = 0; i < kblocks->nr_blocks; i++) {
@@ -3034,6 +3071,11 @@ static int check_valid(int cr, struct block_structure *blocks,
             }
             used[grid[kblocks->blocks[i][j]]-1] = TRUE;
         }
+
+            if (kgrid && check_killer_cage_sum(kblocks, kgrid, grid, i) != 1) {
+                sfree(used);
+                return FALSE;
+            }
     }
     }
 
@@ -3620,7 +3662,7 @@ static char *new_game_desc(const game_params *params, random_state *rs,
 
         if (!gridgen(cr, blocks, kblocks, params->xtype, grid, rs, area*area))
         continue;
-        assert(check_valid(cr, blocks, kblocks, params->xtype, grid));
+        assert(check_valid(cr, blocks, kblocks, NULL, params->xtype, grid));
 
     /*
      * Save the solved grid in aux.
@@ -3841,7 +3883,7 @@ static char *spec_to_dsf(const char **pdesc, int **pdsf, int cr, int area)
     }
     desc++;
 
-    adv = (c != 25);           /* 'z' is a special case */
+    adv = (c != 26);           /* 'z' is a special case */
 
     while (c-- > 0) {
         int p0, p1;
@@ -3850,7 +3892,11 @@ static char *spec_to_dsf(const char **pdesc, int **pdsf, int cr, int area)
          * Non-edge; merge the two dsf classes on either
          * side of it.
          */
-        assert(pos < 2*cr*(cr-1));
+        if (pos >= 2*cr*(cr-1)) {
+                sfree(dsf);
+                return "Too much data in block structure specification";
+            }
+
         if (pos < cr*(cr-1)) {
         int y = pos/(cr-1);
         int x = pos%(cr-1);
@@ -4552,7 +4598,7 @@ static char *interpret_move(const game_state *state, game_ui *ui,
             }
             ui->hcursor = 0;
             ui->hhint = 0;
-            return "";                /* UI activity occurred */
+            return "";               /* UI activity occurred */
         }
         if (button == RIGHT_BUTTON) {
             /*
@@ -4578,7 +4624,7 @@ static char *interpret_move(const game_state *state, game_ui *ui,
             }
             ui->hcursor = 0;
             ui->hhint = 0;
-            return "";                  /* UI activity occurred */
+            return "";               /* UI activity occurred */
         }
     }
     if (IS_CURSOR_MOVE(button)) {
@@ -4598,9 +4644,9 @@ static char *interpret_move(const game_state *state, game_ui *ui,
     }
 
     if (ui->hshow &&
-        ((button >= '0' && button <= '9' && button - '0' <= cr) ||
-         (button >= 'a' && button <= 'z' && button - 'a' + 10 <= cr) ||
-         (button >= 'A' && button <= 'Z' && button - 'A' + 10 <= cr) ||
+       ((button >= '0' && button <= '9' && button - '0' <= cr) ||
+        (button >= 'a' && button <= 'z' && button - 'a' + 10 <= cr) ||
+        (button >= 'A' && button <= 'Z' && button - 'A' + 10 <= cr) ||
          button == CURSOR_SELECT2 || button == '\b')) {
         int n = button - '0';
         if (button >= 'A' && button <= 'Z')
@@ -4615,8 +4661,8 @@ static char *interpret_move(const game_state *state, game_ui *ui,
          * Can't overwrite this square. This can only happen here
          * if we're using the cursor keys.
          */
-        if (state->immutable[ui->hy*cr+ui->hx])
-            return NULL;
+    if (state->immutable[ui->hy*cr+ui->hx])
+        return NULL;
 
         /*
          * Can't make pencil marks in a filled square. Again, this
@@ -4625,12 +4671,12 @@ static char *interpret_move(const game_state *state, game_ui *ui,
         if (ui->hpencil && state->grid[ui->hy*cr+ui->hx])
             return NULL;
 
-        sprintf(buf, "%c%d,%d,%d",
-            (char)(ui->hpencil && n > 0 ? 'P' : 'R'), ui->hx, ui->hy, n);
+    sprintf(buf, "%c%d,%d,%d",
+        (char)(ui->hpencil && n > 0 ? 'P' : 'R'), ui->hx, ui->hy, n);
 
         /* if (!ui->hcursor) ui->hshow = 0; */
 
-        return dupstr(buf);
+    return dupstr(buf);
     }
     if (!ui->hshow &&
        ((button >= '0' && button <= '9' && button - '0' <= cr) ||
@@ -4647,6 +4693,8 @@ static char *interpret_move(const game_state *state, game_ui *ui,
         else ui->hhint = n;
         return "";
     }
+    if (button == 'M' || button == 'm')
+        return dupstr("M");
 
     return NULL;
 }
@@ -4746,9 +4794,25 @@ static game_state *execute_move(const game_state *from, const char *move)
              * We've made a real change to the grid. Check to see
              * if the game has been completed.
              */
-            if (!ret->completed && check_valid(cr, ret->blocks, ret->kblocks,
-                           ret->xtype, ret->grid)) {
+            if (!ret->completed && check_valid(
+                    cr, ret->blocks, ret->kblocks, ret->kgrid,
+                    ret->xtype, ret->grid)) {
                 ret->completed = TRUE;
+            }
+        }
+    return ret;
+    } else if (move[0] == 'M') {
+    /*
+     * Fill in absolutely all pencil marks in unfilled squares,
+     * for those who like to play by the rigorous approach of
+     * starting off in that state and eliminating things.
+     */
+    ret = dup_game(from);
+        for (y = 0; y < cr; y++) {
+            for (x = 0; x < cr; x++) {
+                if (!ret->grid[y*cr+x]) {
+                    memset(ret->pencil + (y*cr+x)*cr, 1, cr);
+                }
             }
         }
     return ret;
@@ -4870,7 +4934,6 @@ static void draw_number(drawing *dr, game_drawstate *ds,
     int cx, cy, cw, ch;
     int col_killer = (hl & 32 ? COL_ERROR : COL_KILLER);
     char str[20];
-    int col_background;
 
     if (ds->grid[y*cr+x] == state->grid[y*cr+x] &&
         ds->hl[y*cr+x] == hl &&
@@ -4897,15 +4960,11 @@ static void draw_number(drawing *dr, game_drawstate *ds,
     clip(dr, cx, cy, cw, ch);
 
     /* background needs erasing */
-    col_background = COL_BACKGROUND;
-    if ((hl & 15) == 4)
-        col_background = COL_NUMHIGHLIGHT;
-    else if ((hl & 15) == 1) 
-        col_background = COL_HIGHLIGHT;
-    else if (ds->xtype && (ondiag0(y*cr+x) || ondiag1(y*cr+x)))
-        col_background = COL_XDIAGONALS;
-
-    draw_rect(dr, cx, cy, cw, ch, col_background);
+    draw_rect(dr, cx, cy, cw, ch,
+          ((hl & 15) == 4 ? COL_NUMHIGHLIGHT :
+          ((hl & 15) == 1 ? COL_HIGHLIGHT :
+           (ds->xtype && (ondiag0(y*cr+x) || ondiag1(y*cr+x))) ? COL_XDIAGONALS :
+           COL_BACKGROUND)));
 
     /*
      * Draw the corners of thick lines in corner-adjacent squares,
@@ -5232,14 +5291,14 @@ static void game_redraw(drawing *dr, game_drawstate *ds,
             /* Highlight active input areas. */
             if (x == ui->hx && y == ui->hy && ui->hshow)
                 highlight = ui->hpencil ? 2 : 1;
-
-           /* Highlight hint number color */
+                
+            /* Highlight hint number color */
             if (!ui->hshow && ui->hhint != 0) {
                 digit p = state->pencil[(y*cr+x) * cr + (ui->hhint -1)];
                 if (p || (d == ui->hhint))
                     highlight = 4;
             }
-
+            
         /* Mark obvious errors (ie, numbers which occur more than once
          * in a single row, column, or box). */
         if (d && (ds->entered_items[x*cr+d-1] > 1 ||
@@ -5256,26 +5315,10 @@ static void game_redraw(drawing *dr, game_drawstate *ds,
         highlight |= 16;
 
         if (d && state->kblocks) {
-        int i, b = state->kblocks->whichblock[y*cr+x];
-        int n_squares = state->kblocks->nr_squares[b];
-        int sum = 0, clue = 0;
-        for (i = 0; i < n_squares; i++) {
-            int xy = state->kblocks->blocks[b][i];
-            if (state->grid[xy] == 0)
-            break;
-
-            sum += state->grid[xy];
-            if (state->kgrid[xy]) {
-            assert(clue == 0);
-            clue = state->kgrid[xy];
-            }
-        }
-
-        if (i == n_squares) {
-            assert(clue != 0);
-            if (sum != clue)
-            highlight |= 32;
-        }
+                if (check_killer_cage_sum(
+                        state->kblocks, state->kgrid, state->grid,
+                        state->kblocks->whichblock[y*cr+x]) == 0)
+                    highlight |= 32;
         }
 
         draw_number(dr, ds, state, x, y, highlight);
@@ -5602,7 +5645,7 @@ static void game_print(drawing *dr, const game_state *state, int tilesize)
 const struct game thegame = {
     "Solo", "games.solo", "solo",
     default_params,
-    game_fetch_preset,
+    game_fetch_preset, NULL,
     decode_params,
     encode_params,
     free_params,
