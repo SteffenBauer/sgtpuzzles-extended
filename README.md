@@ -10,19 +10,18 @@ Extensions/Modifications I wrote for the famous & excellent [Simon Tathams Porta
     * Pressing '+' automatically sets all possible game clues
     * Pressing '-' removes all impossible game clues
     * Pressing a number while no grid cell is selected highlights all grid cells with that number. Left/Right click on a clue in this highlight mode sets the number / removes the clue.
-* Slant:
-    * Extended the generator to three difficulty levels "Easy", "Tricky", "Hard"
-    * New puzzle variation: "Creek", implementation of [Creek](http://www.janko.at/Raetsel/Creek/index.htm)
+* Creek: Path-finding puzzle, implementation of [Creek](http://www.janko.at/Raetsel/Creek/index.htm)
+    * Fully implemented and playable
 * Undead:
     * More sophisticated puzzle generator
     * Four difficulty levels "Easy", "Normal", "Tricky", "Hard"
     * New option "Remove clues", similiar to the option in the 'Magnets' puzzle
 * Unequal:
     * New puzzle variation: "Kropki", implementation of [Kropki](http://wiki.logic-masters.de/index.php?title=Kropki/de)
+* Walls: New puzzle "Walls", find a path through a maze of walls
+    * Playable. Needs still lots of work.
 * Unfinished/Stellar: New puzzle "Stellar", implementation of [Sternenhaufen](http://www.janko.at/Raetsel/Sternenhaufen/index.htm)
     * So far playable in difficulty "Normal".
-* Unfinished/Walls: New puzzle "Walls", find a path through a maze of walls
-    * Playable. Needs still lots of work.
 
 ## Usage:
 
@@ -38,12 +37,14 @@ Contains also the puzzles [boats, rome and salad](https://github.com/x-sheep/puz
 
 Updated to the current Android sgtpuzzles version (using Android Studio)
 
+**Outdated**, won't compile with current Android version.
+
 ## LICENSE
 
-Copyright (c) 2013-2015 Simon Tatham, Steffen Bauer
+Copyright (c) 2013-2021 Simon Tatham, Steffen Bauer
 
 Portion copyright Richard Boulton, James Harvey, Mike Pinna, Jonas
-K�lker, Dariusz Olszewski, Michael Schierl, Lambros Lambrou, Bernd
+Koelker, Dariusz Olszewski, Michael Schierl, Lambros Lambrou, Bernd
 Schmidt, Lennard Sprong and Rogier Goossens.
 
 Distributed under the MIT license, see LICENSE

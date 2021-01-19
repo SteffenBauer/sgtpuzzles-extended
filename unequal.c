@@ -2376,6 +2376,7 @@ const struct game thegame = {
     game_redraw,
     game_anim_length,
     game_flash_length,
+    NULL,
     game_status,
     true, false, game_print_size, game_print,
     false,			       /* wants_statusbar */
