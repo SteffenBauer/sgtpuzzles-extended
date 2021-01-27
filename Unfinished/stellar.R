@@ -1,6 +1,6 @@
 # -*- makefile -*-
 
-STELLAR_EXTRA = latin maxflow tree234
+STELLAR_EXTRA = latin matching tree234
 
 stellar : [X] GTK COMMON stellar STELLAR_EXTRA stellar-icon|no-icon
 stellar : [G] WINDOWS COMMON stellar stellar.res|noicon.res

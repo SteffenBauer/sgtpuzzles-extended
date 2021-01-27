@@ -112,11 +112,11 @@ static game_params *default_params(void) {
     return ret;
 }
 
-static int game_fetch_preset(int i, char **name, game_params **params) {
+static bool game_fetch_preset(int i, char **name, game_params **params) {
     game_params *ret;
     char buf[64];
 
-    if (i < 0 || i >= lenof(stellar_presets)) return FALSE;
+    if (i < 0 || i >= lenof(stellar_presets)) return false;
 
     ret = default_params();
     *ret = stellar_presets[i]; /* struct copy */
@@ -125,7 +125,7 @@ static int game_fetch_preset(int i, char **name, game_params **params) {
     sprintf(buf, "%d %s",stellar_presets[i].size, stellar_diffnames[stellar_presets[i].diff]);
     *name = dupstr(buf);
 
-    return TRUE;
+    return true;
 }
 
 static void free_params(game_params *params) {
@@ -155,7 +155,7 @@ static void decode_params(game_params *params, char const *string) {
     return;
 }
 
-static char *encode_params(const game_params *params, int full) {
+static char *encode_params(const game_params *params, bool full) {
     char buf[256];
     sprintf(buf, "%d", params->size);
     if (full)
@@ -173,30 +173,27 @@ static config_item *game_configure(const game_params *params)
     ret[0].name = "Size";
     ret[0].type = C_STRING;
     sprintf(buf, "%d", params->size);
-    ret[0].sval = dupstr(buf);
-    ret[0].ival = 0;
+    ret[0].u.string.sval = dupstr(buf);
     
     ret[1].name = "Difficulty";
     ret[1].type = C_CHOICES;
-    ret[1].sval = DIFFCONFIG;
-    ret[1].ival = params->diff;
+    ret[1].u.choices.choicenames = DIFFCONFIG;
+    ret[1].u.choices.selected = params->diff;
 
     ret[2].name = NULL;
     ret[2].type = C_END;
-    ret[2].sval = NULL;
-    ret[2].ival = 0;
 
     return ret;
 }
 
 static game_params *custom_params(const config_item *cfg) {
     game_params *ret = snew(game_params);
-    ret->size = atoi(cfg[0].sval);
-    ret->diff = cfg[1].ival;
+    ret->size = atoi(cfg[0].u.string.sval);
+    ret->diff = cfg[1].u.choices.selected;
     return ret;
 }
 
-static char *validate_params(const game_params *params, int full) {
+static const char *validate_params(const game_params *params, bool full) {
     if (params->size < 3)          return "Grid size must be at least 3x3"; 
     if (params->diff != DIFF_NORMAL && 
         params->diff != DIFF_HARD) return "Unknown puzzle difficulty level";
@@ -223,10 +220,10 @@ static game_state *new_state(const game_params *params) {
     state->errors = snewn(v, unsigned char);
     for (i=0;i<v;i++) {
         state->grid[i] = 0x00;
-        state->errors[i] = FALSE;
+        state->errors[i] = false;
     }
-    state->solved = FALSE;
-    state->cheated = FALSE;
+    state->solved = false;
+    state->cheated = false;
     return state;
 }
 
@@ -268,20 +265,20 @@ unsigned char check_line(int star_pos, int cloud_pos, int planet_pos, int planet
     if (planet_illumination == ILLUMINATION_LEFTTOP) {
         if ((cloud_pos < star_pos || planet_pos < cloud_pos) && 
              (star_pos < planet_pos)) 
-            return TRUE;
+            return true;
     }
     else if (planet_illumination == ILLUMINATION_RIGHTBOTTOM) {
         if ((planet_pos < star_pos) && 
            (star_pos < cloud_pos || cloud_pos < planet_pos)) 
-            return TRUE;
+            return true;
     }
     else {
         if (star_pos < cloud_pos && cloud_pos < planet_pos) 
-            return TRUE;
+            return true;
         else if (planet_pos < cloud_pos && cloud_pos < star_pos) 
-            return TRUE;
+            return true;
     }
-    return FALSE;
+    return false;
 }
 
 int planet_position(const game_state *state, int c, int rowcol) {
@@ -297,7 +294,7 @@ int planet_position(const game_state *state, int c, int rowcol) {
 
 unsigned char check_solution(game_state *state) {
     
-    unsigned char solved = TRUE;
+    unsigned char solved = true;
     int x, y;
     int size = state->params.size;
     for (x = 0; x < size; x++)
@@ -330,20 +327,20 @@ unsigned char check_solution(game_state *state) {
             for (x = 0; x < size; x++)
                 if (state->grid[x + y*size] == CODE_CLOUD)
                     state->errors[x + y*size] = ERROR_CLOUD;
-        if (numstar != 1 || numcloud != 1) solved = FALSE;
+        if (numstar != 1 || numcloud != 1) solved = false;
  
         if (numstar == 1 && posplanet > -1 && posstar == posplanet-1 && illumination != ILLUMINATION_LEFTTOP) {
-            solved = FALSE;
+            solved = false;
             state->errors[posplanet + y*size] |= ERROR_LEFT;
         }
         else if (numstar == 1 && posplanet > -1 && posstar == posplanet+1 && illumination != ILLUMINATION_RIGHTBOTTOM) {
-            solved = FALSE;
+            solved = false;
             state->errors[posplanet + y*size] |= ERROR_RIGHT;
         }
                 
         if (numstar == 1 && numcloud == 1 && posstar >= 0 && poscloud >= 0 && posplanet >= 0)
             if (!check_line(posstar, poscloud, posplanet, illumination)) {
-                solved = FALSE;
+                solved = false;
                 if (posstar < posplanet) state->errors[posplanet + y*size] |= ERROR_LEFT;
                 if (posstar > posplanet) state->errors[posplanet + y*size] |= ERROR_RIGHT;
             }
@@ -374,25 +371,25 @@ unsigned char check_solution(game_state *state) {
             for (y = 0; y < size; y++)
                 if (state->grid[x + y*size] == CODE_CLOUD)
                     state->errors[x + y*size] = ERROR_CLOUD;
-        if (numstar != 1 || numcloud != 1) solved = FALSE;
+        if (numstar != 1 || numcloud != 1) solved = false;
         
         if (numstar == 1 && posplanet > -1 && 
             posstar == posplanet-1 && 
             illumination != ILLUMINATION_LEFTTOP) {
-            solved = FALSE;
+            solved = false;
             state->errors[x + posplanet*size] |= ERROR_TOP;
         }
         else if (numstar == 1 && posplanet > -1 && 
                  posstar == posplanet+1 && 
                  illumination != ILLUMINATION_RIGHTBOTTOM) {
-            solved = FALSE;
+            solved = false;
             state->errors[x + posplanet*size] |= ERROR_BOTTOM;
         }
        
         if (numstar == 1 && numcloud == 1 && posstar >= 0 && 
             poscloud >= 0 && posplanet >= 0)
             if (!check_line(posstar, poscloud, posplanet, illumination)) {
-                solved = FALSE;
+                solved = false;
                 if (posstar < posplanet) state->errors[x + posplanet*size] |= ERROR_TOP;
                 if (posstar > posplanet) state->errors[x + posplanet*size] |= ERROR_BOTTOM;
             }
@@ -440,13 +437,13 @@ unsigned char next_guess(struct game_state *game, int *pos, int idx) {
     int size = game->params.size;
     unsigned char finished;
 
-    if (idx >= 2*size) return FALSE;
+    if (idx >= 2*size) return false;
     
-    finished = TRUE;
+    finished = true;
     for (i=0;i<2*size;i++)
-        if (pos[i] >= 0 && pos[i] < (size-1)) finished = FALSE;
+        if (pos[i] >= 0 && pos[i] < (size-1)) finished = false;
        
-    if (finished) return FALSE;    /* No more positions to check */
+    if (finished) return false;    /* No more positions to check */
    
     if (pos[idx] == (size-1)) {                 
         pos[idx] = 0;
@@ -478,7 +475,7 @@ unsigned char next_guess(struct game_state *game, int *pos, int idx) {
         if (pos[2*i+1] >= 0) game->grid[pos[2*i+1] + i*size] = CODE_CLOUD;
     }
         
-    return TRUE;
+    return true;
 }
 
 void initialize_solver(game_state *state) {
@@ -600,16 +597,16 @@ unsigned char solve_bruteforce(game_state *state) {
     int i, j, size;
     unsigned char bp;
     unsigned char sol;
-    unsigned char first_solution = FALSE;
+    unsigned char first_solution = false;
     
     size = state->params.size;
     
     positions = snewn(2*size, int);
     for (i=0;i<2*size;i++) {
-        bp = FALSE;
+        bp = false;
         for (j=0;j<size;j++) {
             if (state->grid[j + (i/2)*size] == ((i%2 == 0) ? CODE_STAR : CODE_CLOUD)) {
-                bp = TRUE;
+                bp = true;
                 break;
             }
         }
@@ -617,7 +614,7 @@ unsigned char solve_bruteforce(game_state *state) {
     }
     
     test_game = dup_game(state);
-    while (TRUE) {
+    while (true) {
         for (i = 0;i<size*size;i++) test_game->grid[i] = state->grid[i];
         if (!next_guess(test_game, positions, 0)) break;
         sol = check_solution(test_game);
@@ -629,7 +626,7 @@ unsigned char solve_bruteforce(game_state *state) {
             sfree(positions);
             return SOLUTION_AMBIGUOUS;
         }
-        if (sol) first_solution = TRUE;
+        if (sol) first_solution = true;
         
     }
     free_game(test_game);
@@ -639,7 +636,7 @@ unsigned char solve_bruteforce(game_state *state) {
 
 unsigned char solve_sequential(game_state *state) {
     unsigned char done_something;
-    while(TRUE) {
+    while(true) {
         
         done_something = solver_combinations(state);        
         if (done_something == SOLVER_DID_ONE_STEP) continue;
@@ -664,7 +661,7 @@ unsigned char solve_recursive(game_state *state, int depth) {
       
     size = state->params.size;
     sol_grid = snewn(size*size, unsigned char);
-    first_solution = FALSE;
+    first_solution = false;
     
     open = 0;
     for (i=0;i<size*size;i++) 
@@ -697,7 +694,7 @@ unsigned char solve_recursive(game_state *state, int depth) {
             }
             
             if (!first_solution && sol == SOLUTION_UNIQUE) {
-                first_solution = TRUE;
+                first_solution = true;
                 for (j=0;j<size*size;j++)
                     sol_grid[j] = test_state->grid[j];
             }
@@ -740,7 +737,7 @@ unsigned char solve_stellar(game_state *state, int difficulty) {
 }
 
 static char *new_game_desc(const game_params *params, random_state *rs,
-               char **aux, int interactive)
+               char **aux, bool interactive)
 {
     game_state *new;
     int *pos;
@@ -753,7 +750,7 @@ static char *new_game_desc(const game_params *params, random_state *rs,
     new = new_state(params);
     count = 0;
     
-    while (TRUE) {
+    while (true) {
         for (i=0;i<params->size;i++) pos[i] = i;
         shuffle(pos, params->size, sizeof(int), rs);
         for (i=0;i<(params->size)*(params->size);i++)
@@ -836,7 +833,7 @@ static char *new_game_desc(const game_params *params, random_state *rs,
     return desc;
 }
 
-static char *validate_desc(const game_params *params, const char *desc)
+static const char *validate_desc(const game_params *params, const char *desc)
 {
     int squares = 0;
     while (*desc) {
@@ -898,7 +895,7 @@ static game_state *new_game(midend *me, const game_params *params, const char *d
 }
 
 static char *solve_game(const game_state *state, const game_state *currstate,
-            const char *aux, char **error)
+            const char *aux, const char **error)
 {
     int i, g;
     char *move, *c;
@@ -926,9 +923,9 @@ static char *solve_game(const game_state *state, const game_state *currstate,
     return move; 
 }
 
-static int game_can_format_as_text_now(const game_params *params)
+static bool game_can_format_as_text_now(const game_params *params)
 {
-    return TRUE;
+    return true;
 }
 
 static char *game_text_format(const game_state *state)
@@ -1100,13 +1097,13 @@ static game_state *execute_move(const game_state *state,
     int solver; 
 
     game_state *ret = dup_game(state);
-    solver = FALSE;
+    solver = false;
 
     while (*move) {
         c = *move;
         if (c == 'R') {
             move++;
-            solver = TRUE;
+            solver = true;
         }
         if (c == 'S' || c == 'C' || c == 'E' ||
             c == 's' || c == 'c') {
@@ -1129,8 +1126,8 @@ static game_state *execute_move(const game_state *state,
     }
 
     correct = check_solution(ret);
-    if (correct && !solver) ret->solved = TRUE;
-    if (solver) ret->cheated = TRUE;
+    if (correct && !solver) ret->solved = true;
+    if (solver) ret->cheated = true;
     
     return ret;
 }
@@ -1186,7 +1183,7 @@ static game_drawstate *game_new_drawstate(drawing *dr, const game_state *state)
     struct game_drawstate *ds = snew(struct game_drawstate);
 
     ds->tilesize = 0;
-    ds->started = ds->solved = FALSE;
+    ds->started = ds->solved = false;
     ds->size = state->params.size;
 
     ds->grid = snewn((ds->size * ds->size), unsigned char);
@@ -1304,10 +1301,10 @@ static void draw_pencils(drawing *dr, game_drawstate *ds,
     dy = BORDER+(y*t)+(t/4);
 
     if (pencil & CODE_STAR)
-        draw_star_template(dr, ds, dx, dy, t/2, FALSE, hflash);
+        draw_star_template(dr, ds, dx, dy, t/2, false, hflash);
 
     if (pencil & CODE_CLOUD)
-        draw_cloud_template(dr, ds, dx+t/2, dy, t/2, FALSE, hflash);
+        draw_cloud_template(dr, ds, dx+t/2, dy, t/2, false, hflash);
 
     return;
 }
@@ -1429,34 +1426,34 @@ static void game_redraw(drawing *dr, game_drawstate *ds,
                     2*BORDER+(ds->size)*t);
      }
 
-    hchanged = FALSE;
+    hchanged = false;
     if (ds->hx != ui->hx || ds->hy != ui->hy ||
         ds->hshow != ui->hshow || ds->hpencil != ui->hpencil)
-        hchanged = TRUE;
+        hchanged = true;
     
     for (y=0;y<ds->size;y++) 
     for (x=0;x<ds->size;x++) {
         unsigned char c, err;
         
-        stale = FALSE;
+        stale = false;
         c = state->grid[x+y*ds->size];
         err = state->errors[x+y*ds->size];
     
-        if (ds->hflash != hflash) stale = TRUE;
+        if (ds->hflash != hflash) stale = true;
 
         if (hchanged) {
             if ((x == ui->hx && y == ui->hy) ||
                 (x == ds->hx && y == ds->hy))
-                stale = TRUE;
+                stale = true;
         }
         
         if (ds->grid_errors[x+y*ds->size] != err) {
-            stale = TRUE;
+            stale = true;
             ds->grid_errors[x+y*ds->size] = err;
         }
             
         if (ds->grid[x+y*ds->size] != c) {
-            stale = TRUE;
+            stale = true;
             ds->grid[x+y*ds->size] = c;
         }
                     
@@ -1482,7 +1479,7 @@ static void game_redraw(drawing *dr, game_drawstate *ds,
     ds->hshow = ui->hshow;
     ds->hpencil = ui->hpencil;
     ds->hflash = hflash;
-    ds->started = TRUE;
+    ds->started = true;
     return;
 }
 
@@ -1500,14 +1497,27 @@ static float game_flash_length(const game_state *oldstate,
 
 }
 
+static void game_get_cursor_location(const game_ui *ui,
+                                     const game_drawstate *ds,
+                                     const game_state *state,
+                                     const game_params *params,
+                                     int *x, int *y, int *w, int *h)
+{
+    if(ui->hshow) {
+        *x = BORDER + (ui->hx) * TILE_SIZE;
+        *y = BORDER + (ui->hy + 1) * TILE_SIZE;
+        *w = *h = TILE_SIZE;
+    }
+}
+
 static int game_status(const game_state *state)
 {
     return state->solved;
 }
 
-static int game_timing_state(const game_state *state, game_ui *ui)
+static bool game_timing_state(const game_state *state, game_ui *ui)
 {
-    return TRUE;
+    return true;
 }
 
 static void game_print_size(const game_params *params, float *x, float *y)
@@ -1525,24 +1535,25 @@ static void game_print(drawing *dr, const game_state *state, int tilesize)
 const struct game thegame = {
     "Stellar", "games.stellar", "stellar",
     default_params,
-    game_fetch_preset,
+    game_fetch_preset, NULL,
     decode_params,
     encode_params,
     free_params,
     dup_params,
-    TRUE, game_configure, custom_params,
+    true, game_configure, custom_params,
     validate_params,
     new_game_desc,
     validate_desc,
     new_game,
     dup_game,
     free_game,
-    TRUE, solve_game,
-    TRUE, game_can_format_as_text_now, game_text_format,
+    true, solve_game,
+    true, game_can_format_as_text_now, game_text_format,
     new_ui,
     free_ui,
     encode_ui,
     decode_ui,
+    NULL,
     game_changed_state,
     interpret_move,
     execute_move,
@@ -1553,10 +1564,11 @@ const struct game thegame = {
     game_redraw,
     game_anim_length,
     game_flash_length,
+    game_get_cursor_location,
     game_status,
-    FALSE, FALSE, game_print_size, game_print,
-    FALSE,                   /* wants_statusbar */
-    FALSE, game_timing_state,
+    false, false, game_print_size, game_print,
+    false,                   /* wants_statusbar */
+    false, game_timing_state,
     0,                       /* flags */
 };
 
