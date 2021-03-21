@@ -125,18 +125,15 @@ static char const unequal_diffchars[] = DIFFLIST(ENCODE);
 #define DEFAULT_PRESET 0
 
 static const struct game_params unequal_presets[] = {
-    {  4, DIFF_EASY,    0 },
-    {  5, DIFF_EASY,    0 },
     {  5, DIFF_SET,     0 },
     {  5, DIFF_SET,     1 },
+    {  5, DIFF_SET,     2 },
     {  5, DIFF_EXTREME, 0 },
-    {  6, DIFF_EASY,    0 },
-    {  6, DIFF_SET,     0 },
-    {  6, DIFF_SET,     1 },
+    {  5, DIFF_EXTREME, 1 },
+    {  5, DIFF_EXTREME, 2 },
     {  6, DIFF_EXTREME, 0 },
-    {  7, DIFF_SET,     0 },
-    {  7, DIFF_SET,     1 },
-    {  7, DIFF_EXTREME, 0 }
+    {  6, DIFF_EXTREME, 1 },
+    {  6, DIFF_EXTREME, 2 },
 };
 
 static bool game_fetch_preset(int i, char **name, game_params **params)
@@ -889,19 +886,19 @@ static int solver_adjacent_set(struct latin_solver *solver, void *vctx)
 static int solver_easy(struct latin_solver *solver, void *vctx)
 {
     struct solver_ctx *ctx = (struct solver_ctx *)vctx;
-    if (ctx->state->mode == MODE_ADJACENT)
-	return solver_adjacent(solver, vctx);
+    if (ctx->state->mode >= MODE_ADJACENT)
+        return solver_adjacent(solver, vctx);
     else
-	return solver_links(solver, vctx);
+        return solver_links(solver, vctx);
 }
 
 static int solver_set(struct latin_solver *solver, void *vctx)
 {
     struct solver_ctx *ctx = (struct solver_ctx *)vctx;
-    if (ctx->state->mode == MODE_ADJACENT)
-	return solver_adjacent_set(solver, vctx);
+    if (ctx->state->mode >= MODE_ADJACENT)
+        return solver_adjacent_set(solver, vctx);
     else
-	return 0;
+        return 0;
 }
 
 #define SOLVER(upper,title,func,lower) func,
@@ -954,7 +951,7 @@ static bool unequal_valid(struct latin_solver *solver, void *vctx)
                 }
             }
         }
-    } else {
+    } else if (ctx->state->mode == MODE_UNEQUAL) {
         int i;
         for (i = 0; i < ctx->nlinks; i++) {
             struct solver_link *link = &ctx->links[i];
@@ -984,9 +981,9 @@ static int solver_state(game_state *state, int maxdiff)
     latin_solver_alloc(&solver, state->nums, state->order);
 
     diff = latin_solver_main(&solver, maxdiff,
-			     DIFF_LATIN, DIFF_SET, DIFF_EXTREME,
-			     DIFF_EXTREME, DIFF_RECURSIVE,
-			     unequal_solvers, unequal_valid, ctx,
+         DIFF_LATIN, DIFF_SET, DIFF_EXTREME,
+         DIFF_EXTREME, DIFF_RECURSIVE,
+             unequal_solvers, unequal_valid, ctx,
                              clone_ctx, free_ctx);
 
     memcpy(state->hints, solver.cube, state->order*state->order*state->order);
@@ -1167,7 +1164,7 @@ static int gg_best_clue(game_state *state, int *scratch, digit *latin)
 int maxtries;
 #define MAXTRIES maxtries
 #else
-#define MAXTRIES 100
+#define MAXTRIES 1000
 #endif
 static int gg_solved;
 

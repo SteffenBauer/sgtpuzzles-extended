@@ -33,7 +33,9 @@
 
 enum {
     COL_BACKGROUND,
-    COL_LIGHT,
+    COL_CURSOR_GRID,
+    COL_CURSOR_FILLED,
+    COL_CURSOR_EMPTY,
     COL_GRID,
     COL_INK,
     COL_ERROR,
@@ -414,7 +416,7 @@ static bool check_completed_creek(int w, int h,
     memset(errors, 0, W*H);
 
     if (!check_connectedness_creek(w, h, dsf, soln, clues, DIFF_EASY)) {
-        err = false;
+        err = true;
         for (y = 0; y < h; y++) {
             for (x = 0; x < w; x++) {
                 if (soln[y*w+x] < 0) {
@@ -1048,6 +1050,54 @@ static char *solve_game(const game_state *state, const game_state *currstate,
     return move;
 }
 
+static bool game_can_format_as_text_now(const game_params *params) {
+    return true;
+}
+
+static char *game_text_format(const game_state *state)
+{
+    int w = state->p.w, h = state->p.h, W = w+1, H = h+1;
+    int x, y, len;
+    char *ret, *p;
+
+    len = (h+H) * (2*w+W+1) + 1;
+    ret = snewn(len, char);
+    p = ret;
+
+    for (y = 0; y < H; y++) {
+        for (x = 0; x < W; x++) {
+            if (state->clues->clues[y*W+x] >= 0)
+                *p++ = state->clues->clues[y*W+x] + '0';
+            else
+                *p++ = '+';
+            if (x < w) {
+                *p++ = '-' ;
+                *p++ = '-' ;
+            }
+        }
+        *p++ = '\n';
+        if (y < h) {
+            for (x = 0; x < W; x++) {
+                *p++ = '|';
+                if (x < w) {
+                    if (state->soln[y*w+x] != 0) {
+                       *p++ = (state->soln[y*w+x] < 0 ? ' ' : '#');
+                       *p++ = (state->soln[y*w+x] < 0 ? ' ' : '#');
+                    }
+                    else {
+                        *p++ = '.';
+                        *p++ = '.';
+                    }
+                }
+            }
+            *p++ = '\n';
+        }
+    }
+    *p++ = '\0';
+
+    return ret;
+}
+
 typedef enum {CLEAR, BLACK, WHITE} DRAGMODE;
 
 struct game_ui {
@@ -1055,6 +1105,8 @@ struct game_ui {
     bool *seln;
     int dx, dy;
     DRAGMODE mode;
+    int cur_x, cur_y;
+    bool cur_visible;
 };
 
 static game_ui *new_ui(const game_state *state)
@@ -1063,6 +1115,8 @@ static game_ui *new_ui(const game_state *state)
     ui->seln = snewn(state->p.w * state->p.h, bool);
     ui->is_drag = false;
     ui->dx = ui->dy = -1;
+    ui->cur_x = ui->cur_y = 0;
+    ui->cur_visible = false;
     return ui;
 }
 
@@ -1094,6 +1148,8 @@ static void game_changed_state(game_ui *ui, const game_state *oldstate,
 #define COORD(x)  ( (x) * TILESIZE + BORDER )
 #define FROMCOORD(x)  ( ((x) - BORDER + TILESIZE) / TILESIZE - 1 )
 
+#define FLASH_TIME 0.30F
+
 /*
  * Bit fields in the `grid' and `todraw' elements of the drawstate.
  */
@@ -1107,6 +1163,9 @@ static void game_changed_state(game_ui *ui, const game_state *oldstate,
 #define CR_GREY   0x0040
 #define CR_ERR    0x0080
 
+#define FLASH     0x0100
+#define CURSOR    0x0200
+
 struct game_drawstate {
     int tilesize;
     bool started;
@@ -1114,7 +1173,7 @@ struct game_drawstate {
     long *todraw;
 };
 
-static DRAGMODE get_dragmode(int button, int cell, bool swapped) {
+static DRAGMODE get_dragmode(int button, int cell) {
     if (button == LEFT_DRAG) button = LEFT_BUTTON;
     if (button == RIGHT_DRAG) button = RIGHT_BUTTON;
     if (button == LEFT_BUTTON && cell == 0) return BLACK;
@@ -1129,29 +1188,59 @@ static char *interpret_move(const game_state *state, game_ui *ui,
                             int x, int y, int button)
 {
     int w = state->p.w, h = state->p.h;
-    bool swapped = false;
 
     x = FROMCOORD(x);
     y = FROMCOORD(y);
 
-    if (x < 0 || y < 0 || x >= w || y >= h) {
+    if (IS_CURSOR_SELECT(button)) {
+        char buf[64];
+        char action;
+        int c;
+        if (!ui->cur_visible) {
+            ui->cur_visible = true;
+            return UI_UPDATE;
+        }
+        x = ui->cur_x;
+        y = ui->cur_y;
+        c = state->soln[y*w+x];
+
+        action = 'C';
+        if (button == CURSOR_SELECT) {
+            if      (c == 0)  action = 'B';
+            else if (c == 1)  action = 'W';
+        } else if (button == CURSOR_SELECT2) {
+            if      (c == 0)  action = 'W';
+            else if (c == -1) action = 'B';
+        }
+        sprintf(buf, "%c%d,%d", action, x, y);
+        return dupstr(buf);
+    } else if (IS_CURSOR_MOVE(button)) {
+        move_cursor(button, &ui->cur_x, &ui->cur_y, w, h, false);
+        ui->cur_visible = true;
+        return UI_UPDATE;
+    }
+
+    else if (x < 0 || y < 0 || x >= w || y >= h) {
+        ui->cur_visible = false;
         ui->is_drag = false;
         ui->dx = ui->dy = -1;
         memset(ui->seln, false, w*h);
         return UI_UPDATE;
     }
 
-    if (button == LEFT_BUTTON || button == RIGHT_BUTTON) {
-        ui->mode = get_dragmode(button, state->soln[y*w+x], swapped);
+    else if (button == LEFT_BUTTON || button == RIGHT_BUTTON) {
+        ui->cur_visible = false;
+        ui->mode = get_dragmode(button, state->soln[y*w+x]);
         ui->is_drag = true;
         ui->dx = x; ui->dy = y;
         memset(ui->seln, false, w*h);
         ui->seln[y*w+x] = true;
         return UI_UPDATE;
     } else if (button == LEFT_DRAG || button == RIGHT_DRAG) {
+        ui->cur_visible = false;
         if (!ui->is_drag) {
             ui->is_drag = true;
-            ui->mode = get_dragmode(button, state->soln[y*w+x], swapped);
+            ui->mode = get_dragmode(button, state->soln[y*w+x]);
         }
         if (x != ui->dx || y != ui->dy) {
             if (!ui->seln[y*w+x]) {
@@ -1180,6 +1269,7 @@ static char *interpret_move(const game_state *state, game_ui *ui,
         bufsize = 256;
         buf = snewn(bufsize, char);
         sep = "";
+        ui->cur_visible = false;
 
         for (i=0;i<w*h;i++) {
             if (ui->seln[i]) {
@@ -1212,6 +1302,7 @@ static char *interpret_move(const game_state *state, game_ui *ui,
             return buf;
         }
     }
+
     return NULL;
 }
 
@@ -1283,14 +1374,17 @@ static float *game_colours(frontend *fe, int *ncolours)
     int i;
     float *ret = snewn(3 * NCOLOURS, float);
 
+    frontend_default_colour(fe, &ret[COL_BACKGROUND * 3]);
+
     for (i=0;i<3;i++) {
-        ret[COL_BACKGROUND   * 3 + i] = 1.0F;
-        ret[COL_LIGHT        * 3 + i] = 0.9F;
-        ret[COL_GRID         * 3 + i] = 0.25F;
-        ret[COL_INK          * 3 + i] = 0.0F;
-        ret[COL_CREEK_UNDEF  * 3 + i] = 0.75F;
-        ret[COL_CREEK_FILLED * 3 + i] = 0.0F;
-        ret[COL_CREEK_EMPTY  * 3 + i] = 1.0F;
+        ret[COL_GRID          * 3 + i] = ret[COL_BACKGROUND * 3 + i] * 0.25F;
+        ret[COL_INK           * 3 + i] = 0.0F;
+        ret[COL_CREEK_UNDEF   * 3 + i] = ret[COL_BACKGROUND * 3 + i] * 0.75F;
+        ret[COL_CREEK_FILLED  * 3 + i] = 0.0F;
+        ret[COL_CREEK_EMPTY   * 3 + i] = 1.0F;
+        ret[COL_CURSOR_GRID   * 3 + i] = ret[COL_BACKGROUND * 3 + i] * 0.5F;
+        ret[COL_CURSOR_FILLED * 3 + i] = 0.75F;
+        ret[COL_CURSOR_EMPTY  * 3 + i] = 0.25F;
     }
     ret[COL_ERROR        * 3 + 0] = 1.0F;
     ret[COL_ERROR        * 3 + 1] = 0.0F;
@@ -1345,17 +1439,25 @@ static void draw_tile_creek(drawing *dr, game_drawstate *ds, game_clues *clues,
               int x, int y, long v)
 {
     int w = clues->w, h = clues->h, W = w+1 /*, H = h+1 */;
-
-    clip(dr, COORD(x), COORD(y), TILESIZE, TILESIZE);
-
-    draw_rect(dr, COORD(x), COORD(y), TILESIZE, TILESIZE,
+    int color = (v & FLASH) ? COL_GRID :
           (v & CR_ERR)   ? COL_CREEK_EMPTY :
           (v & CR_BLACK) ? COL_CREEK_FILLED :
           (v & CR_WHITE) ? COL_CREEK_EMPTY :
-          (x<0 || x==w || y<0 || y==h) ? COL_LIGHT : COL_CREEK_UNDEF);
+          (x<0 || x>=w || y<0 || y>=h) ? COL_BACKGROUND : COL_CREEK_UNDEF;
+    clip(dr, COORD(x), COORD(y), TILESIZE, TILESIZE);
+
+    draw_rect(dr, COORD(x), COORD(y), TILESIZE, TILESIZE, color);
 
     if (v & CR_ERR)
         draw_circle(dr, COORD(x) + (ds->tilesize)/2, COORD(y) + (ds->tilesize)/2, (9+ ds->tilesize) / 20, COL_ERROR, COL_GRID);
+
+    if (v & CURSOR) {
+        int cur_col = (v & CR_BLACK) ? COL_CURSOR_FILLED :
+                      (v & CR_WHITE) ? COL_CURSOR_EMPTY :
+                                       COL_CURSOR_GRID;
+        draw_rect(dr, COORD(x)+TILESIZE/12+1, COORD(y)+TILESIZE/12+1, 10*TILESIZE/12, 10*TILESIZE/12, cur_col);
+        draw_rect(dr, COORD(x)+TILESIZE/6+1, COORD(y)+TILESIZE/6+1, 4*TILESIZE/6, 4*TILESIZE/6, color);
+    }
 
     /*
       * Draw the grid lines.
@@ -1403,10 +1505,17 @@ static void game_redraw(drawing *dr, game_drawstate *ds,
     int w = state->p.w, h = state->p.h, W = w+1, H = h+1;
     int x, y;
 
+    bool flashing;
+
+    if (flashtime > 0)
+        flashing = (int)(flashtime * 3 / FLASH_TIME) != 1;
+    else
+        flashing = false;
+
     if (!ds->started) {
         int ww, wh;
         game_compute_size(&state->p, TILESIZE, &ww, &wh);
-        draw_rect(dr, 0, 0, ww, wh, COL_LIGHT);
+        draw_rect(dr, 0, 0, ww, wh, COL_BACKGROUND);
         draw_update(dr, 0, 0, ww, wh);
         ds->started = true;
     }
@@ -1414,7 +1523,8 @@ static void game_redraw(drawing *dr, game_drawstate *ds,
     /* Creek */
     for (y = -1; y <= h; y++) {
         for (x = -1; x <= w; x++) {
-            ds->todraw[(y+1)*(w+2)+(x+1)] = 0;
+            ds->todraw[(y+1)*(w+2)+(x+1)] = 
+                (flashing && (x >= 0 && x < w && y >= 0 && y < h)) ? FLASH : 0;
         }
     }
 
@@ -1440,6 +1550,8 @@ static void game_redraw(drawing *dr, game_drawstate *ds,
             else if (state->soln[y*w+x] > 0) {
                 ds->todraw[(y+1)*(w+2)+(x+1)] |= CR_BLACK;
             }
+            if (ui->cur_visible && ui->cur_x == x && ui->cur_y == y)
+                ds->todraw[(y+1)*(w+2)+(x+1)] |= CURSOR;
         }
     }
 
@@ -1476,7 +1588,23 @@ static float game_anim_length(const game_state *oldstate,
 static float game_flash_length(const game_state *oldstate,
                                const game_state *newstate, int dir, game_ui *ui)
 {
+   if (!oldstate->completed && newstate->completed &&
+       !oldstate->used_solve && !newstate->used_solve)
+        return FLASH_TIME;
+
     return 0.0F;
+}
+
+static void game_get_cursor_location(const game_ui *ui,
+                                     const game_drawstate *ds,
+                                     const game_state *state,
+                                     const game_params *params,
+                                     int *x, int *y, int *w, int *h) {
+    if(ui->cur_visible) {
+        *x = COORD(ui->cur_x);
+        *y = COORD(ui->cur_y);
+        *w = *h = TILESIZE;
+    }
 }
 
 static int game_status(const game_state *state)
@@ -1509,7 +1637,7 @@ const struct game thegame = {
     dup_game,
     free_game,
     true, solve_game,
-    false, NULL, NULL,
+    true, game_can_format_as_text_now, game_text_format,
     new_ui,
     free_ui,
     encode_ui,
@@ -1525,7 +1653,7 @@ const struct game thegame = {
     game_redraw,
     game_anim_length,
     game_flash_length,
-    NULL,
+    game_get_cursor_location,
     game_status,
     false, false, NULL, NULL,
     false,                             /* wants_statusbar */

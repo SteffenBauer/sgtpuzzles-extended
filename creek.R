@@ -1,6 +1,6 @@
 # -*- makefile -*-
 
-CREEK_EXTRA = dsf findloop
+CREEK_EXTRA = dsf
 
 creek    : [X] GTK COMMON creek CREEK_EXTRA creek-icon|no-icon
 

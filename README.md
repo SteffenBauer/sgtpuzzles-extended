@@ -16,6 +16,7 @@ Extensions/Modifications I wrote for the famous & excellent [Simon Tathams Porta
     * More sophisticated puzzle generator
     * Four difficulty levels "Easy", "Normal", "Tricky", "Hard"
     * New option "Remove clues", similiar to the option in the 'Magnets' puzzle
+    * Show count of placed monsters
 * Unequal:
     * New puzzle variation: "Kropki", implementation of [Kropki](http://wiki.logic-masters.de/index.php?title=Kropki/de)
 * Walls: New puzzle "Walls", find a path through a maze of walls
@@ -28,6 +29,10 @@ Extensions/Modifications I wrote for the famous & excellent [Simon Tathams Porta
 You need a copy of the SGT Puzzle collection source code. Copy the source files from this repository into this build directory, and recompile.
 
 For instructions how to compile the game collection, see the README accompanying the original puzzle collection.
+
+## Utility examples
+
+[Example code](https://github.com/SteffenBauer/sgtpuzzles-extended/blob/master/Examples) for the utility API.
 
 ## Android
 
