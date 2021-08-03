@@ -365,7 +365,9 @@ int check_solution(game_state *state, bool full) {
 
     if (solved != SOLVED) return solved;
 
-    /* Check if all cells are connected */
+    /* Check if all cells are connected 
+     * TODO Mark unconnected cells if exit_count >=2 && dsf[exit1] == dsf[exit2]
+    */
     dsf = snewn(w*h,int);
     dsf_init(dsf, w*h);
     for (y=0;y<h;y++)
@@ -393,9 +395,15 @@ int check_solution(game_state *state, bool full) {
     return solved;
 }
 
-bool solve_single_cells(game_state *state) {
-    int i, x, y;
-    bool changed = false;;
+struct solver_scratch {
+    int *loopdsf;
+    int difficulty;
+    bool verbose;
+};
+
+bool solve_single_cells(game_state *state, struct solver_scratch *scratch) {
+    int i, j, x, y;
+    bool changed = false;
     int w = state->w;
     int h = state->h;
 
@@ -403,9 +411,8 @@ bool solve_single_cells(game_state *state) {
     for (x=0;x<w;x++) {
         unsigned char *edges[4];
         unsigned char available_mask = 0;
-        unsigned char path_mask = 0;
-        unsigned char available_count = 0;
         unsigned char path_count = 0;
+        unsigned char wall_count = 0;
 
         edges[0] = state->edge_h + y*w + x;
         edges[1] = edges[0] + w;
@@ -413,25 +420,34 @@ bool solve_single_cells(game_state *state) {
         edges[3] = edges[2] + 1;
 
         for (i = 0; i < 4; ++i) {
-            if ((*edges[i] & EDGE_WALL) == 0) {
-                available_mask |= (0x01 << i);
-                available_count++;
-            }
-            if (*edges[i] & EDGE_PATH) {
-                path_mask |= (0x01 << i);
-                path_count++;
-            }
+            if (*edges[i] == EDGE_NONE) available_mask |= (0x01 << i);
+            else if ((*edges[i] & EDGE_PATH) == EDGE_PATH) path_count++;
+            else if ((*edges[i] & EDGE_WALL) == EDGE_WALL) wall_count++;
         }
-        if (available_count == 2 && path_count < 2) {
+        if (wall_count == 2 && path_count < 2) {
             for (i = 0; i < 4; i++) {
-                if (available_mask & (0x01 << i)) *edges[i] |= EDGE_PATH;
-                else                              *edges[i] |= EDGE_WALL;
+                if (available_mask & (0x01 << i)){ 
+                    if (scratch->verbose)
+                        printf("Set path in cell %i/%i at %i\n",x,y,i);
+                    *edges[i] |= EDGE_PATH;
+                    if (scratch->difficulty >= DIFF_NORMAL) {
+                        j = x+y*w;
+                        if (i==0 && y>0)     dsf_merge(scratch->loopdsf, j, j-w);
+                        if (i==1 && y<(h-1)) dsf_merge(scratch->loopdsf, j, j+w);
+                        if (i==2 && x>0)     dsf_merge(scratch->loopdsf, j, j-1);
+                        if (i==3 && x<(w-1)) dsf_merge(scratch->loopdsf, j, j+1);
+                    }
+                }
             }
             changed = true;
         }
-        else if (path_count == 2 && available_count > 2) {
+        else if (path_count == 2 && wall_count < 2) {
             for (i = 0; i < 4; ++i) {
-                if ((path_mask & (0x01 << i)) == 0) *edges[i] |= EDGE_WALL;
+                if (available_mask & (0x01 << i)) {
+                    if (scratch->verbose)
+                        printf("Set wall in cell %i/%i at %i\n",x,y,i);
+                    *edges[i] |= EDGE_WALL;
+                }
             }
             changed = true;
         }
@@ -439,12 +455,108 @@ bool solve_single_cells(game_state *state) {
     return changed;
 }
 
-int alcazar_solve(game_state *state, int difficulty) {
+bool solve_loops(game_state *state, struct solver_scratch *scratch) {
+    int i,j,x,y,p,idx;
+    unsigned char *edges[4];
+    unsigned char wall_count, free_count;
+    int dsf_idx[4];
+    int single_idx;
+    bool changed = false;
+    int w = state->w;
+    int h = state->h;
+    for (y=0;y<h;y++) {
+        for (x=0;x<w;x++) {
+            p = x+y*w;
+            wall_count = free_count = 0;
+            /* Loop ladder detection 
+             * 
+             * Conditions: 3 free edges
+                           1 wall
+                           2 free edges are connected
+               -> 3rd edge must be a path
+            */
+            edges[0] = state->edge_h + y*w + x;
+            edges[1] = edges[0] + w;
+            edges[2] = state->edge_v + y*(w+1) + x;
+            edges[3] = edges[2] + 1;
+            for (i=0;i<4;i++) {
+                if (*edges[i] == EDGE_NONE) {
+                    free_count++;
+                    idx = -1;
+                    if (i==0 && y>0)     idx = dsf_canonify(scratch->loopdsf, p-w);
+                    if (i==1 && y<(h-1)) idx = dsf_canonify(scratch->loopdsf, p+w);
+                    if (i==2 && x>0)     idx = dsf_canonify(scratch->loopdsf, p-1);
+                    if (i==3 && x<(w-1)) idx = dsf_canonify(scratch->loopdsf, p+1);
+                    dsf_idx[i] = idx;
+                }
+                if ((*edges[i] & EDGE_WALL) == EDGE_WALL) {
+                    wall_count++;
+                    dsf_idx[i] = -2;
+                }
+            }
+            if (free_count == 3 && wall_count == 1) {
+                if (scratch->verbose)
+                    printf("Possible loop ladder at %i/%i: %i %i %i %i\n",
+                        x, y, dsf_idx[0], dsf_idx[1], dsf_idx[2], dsf_idx[3]);
+                single_idx = -1;
+                if (dsf_idx[0] == -2) {
+                    if (dsf_idx[1] != dsf_idx[2] && dsf_idx[2] == dsf_idx[3]) single_idx = 1;
+                    if (dsf_idx[2] != dsf_idx[1] && dsf_idx[1] == dsf_idx[3]) single_idx = 2;
+                    if (dsf_idx[3] != dsf_idx[1] && dsf_idx[1] == dsf_idx[2]) single_idx = 3;
+                }
+                else if (dsf_idx[1] == -2) {
+                    if (dsf_idx[0] != dsf_idx[2] && dsf_idx[2] == dsf_idx[3]) single_idx = 0;
+                    if (dsf_idx[2] != dsf_idx[0] && dsf_idx[0] == dsf_idx[3]) single_idx = 2;
+                    if (dsf_idx[3] != dsf_idx[0] && dsf_idx[0] == dsf_idx[2]) single_idx = 3;
+                }
+                else if (dsf_idx[2] == -2) {
+                    if (dsf_idx[0] != dsf_idx[1] && dsf_idx[1] == dsf_idx[3]) single_idx = 0;
+                    if (dsf_idx[1] != dsf_idx[0] && dsf_idx[0] == dsf_idx[3]) single_idx = 1;
+                    if (dsf_idx[3] != dsf_idx[0] && dsf_idx[0] == dsf_idx[1]) single_idx = 3;
+                }
+                else if (dsf_idx[3] == -2) {
+                    if (dsf_idx[0] != dsf_idx[1] && dsf_idx[1] == dsf_idx[2]) single_idx = 0;
+                    if (dsf_idx[1] != dsf_idx[0] && dsf_idx[0] == dsf_idx[2]) single_idx = 1;
+                    if (dsf_idx[2] != dsf_idx[0] && dsf_idx[0] == dsf_idx[1]) single_idx = 2;
+                }
+                if (single_idx != -1) {
+                    if (scratch->verbose)
+                        printf("Loop ladder at cell %i/%i, placing edge at %i\n", x, y, single_idx);
+                    *edges[single_idx] |= EDGE_PATH;
+                    for (i=0;i<4;i++) {
+                        if (dsf_idx[i] != -2) {
+                            if (i==0 && y>0)     dsf_merge(scratch->loopdsf, p, p-w);
+                            if (i==1 && y<(h-1)) dsf_merge(scratch->loopdsf, p, p+w);
+                            if (i==2 && x>0)     dsf_merge(scratch->loopdsf, p, p-1);
+                            if (i==3 && x<(w-1)) dsf_merge(scratch->loopdsf, p, p+1);
+                        }
+                    }
+                    changed = true;
+                    break;
+                }
+            }
+        }
+        if (changed) break;
+    }
+
+    return changed;
+}
+
+int alcazar_solve(game_state *state, int difficulty, bool verbose) {
+    struct solver_scratch *scratch = snew(struct solver_scratch);
+    scratch->loopdsf = snewn(state->w*state->h, int);
+    dsf_init(scratch->loopdsf, state->w*state->h);
+    scratch->difficulty = difficulty;
+    scratch->verbose = verbose;
+
     while(true) {
-        if (solve_single_cells(state)) continue; 
+        if (difficulty >= DIFF_EASY   && solve_single_cells(state, scratch)) continue;
+        if (difficulty >= DIFF_NORMAL && solve_loops(state, scratch)) continue;
         break;
     }
 
+    sfree(scratch->loopdsf);
+    sfree(scratch);
     return check_solution(state, false);
 }
 
@@ -660,69 +772,84 @@ static char *new_game_desc(const game_params *params, random_state *rs,
     int ws = (w+1)*h + w*(h+1);
     int vo = w*(h+1);
     int *wallidx;
+    int result;
 
-    borderreduce = 200; /* 2*w+2*h; */
+    borderreduce = 2*w+2*h;
     wallidx = snewn(ws, int);
     
-    new = new_state(params);
-    generate_hamiltonian_path(new, rs);
-    /* print_grid(new); */
+    while (true) {
+        wallnum = bordernum = 0;
+        new = new_state(params);
+        generate_hamiltonian_path(new, rs);
+        /* print_grid(new); */
 
-    for (i=0;i<w*(h+1);i++)
-        if ((new->edge_h[i] & EDGE_WALL) > 0x00)
-            wallidx[wallnum++] = i;
-    for (i=0;i<(w+1)*h;i++)
-        if ((new->edge_v[i] & EDGE_WALL) > 0x00)
-            wallidx[wallnum++] = i+vo;
+        for (i=0;i<w*(h+1);i++)
+            if ((new->edge_h[i] & EDGE_WALL) > 0x00)
+                wallidx[wallnum++] = i;
+        for (i=0;i<(w+1)*h;i++)
+            if ((new->edge_v[i] & EDGE_WALL) > 0x00)
+                wallidx[wallnum++] = i+vo;
 
-    shuffle(wallidx, wallnum, sizeof(int), rs);
+        shuffle(wallidx, wallnum, sizeof(int), rs);
 
-    for (i=0;i<wallnum;i++) {
-        int wi = wallidx[i];
+        for (i=0;i<wallnum;i++) {
+            int wi = wallidx[i];
 
-        /* Remove border walls up to 'borderreduce' */
-        /* Avoid two open border edges on a corner cell */
-        if (wi<vo) {
-            int xh, yh;
-            xh = wi%w; yh = wi/w;
-            /* printf("Horizontal edge at %i/%i (%i)\n",xh,yh,wi); */
-            if ((xh == 0     && yh == 0 && ((new->edge_v[0]           & EDGE_WALL) == 0x00)) ||
-                (xh == (w-1) && yh == 0 && ((new->edge_v[w]           & EDGE_WALL) == 0x00)) ||
-                (xh == 0     && yh == h && ((new->edge_v[w*h]         & EDGE_WALL) == 0x00)) ||
-                (xh == (w-1) && yh == h && ((new->edge_v[(w+1)*h-1]   & EDGE_WALL) == 0x00)) ||
-                ((yh == 0 || yh == h) && (bordernum >= borderreduce)))
-                continue;
-        }
-        else {
-            int xv, yv;
-            xv = (wi-vo)%(w+1); yv = (wi-vo)/(w+1);
-            /* printf("Vertical edge at %i/%i (%i)\n",xv,yv,wi-vo); */
-            if ((xv == 0 && yv == 0     && ((new->edge_h[0]           & EDGE_WALL) == 0x00)) ||
-                (xv == w && yv == 0     && ((new->edge_h[w-1]         & EDGE_WALL) == 0x00)) ||
-                (xv == 0 && yv == (h-1) && ((new->edge_h[w*h]         & EDGE_WALL) == 0x00)) ||
-                (xv == w && yv == (h-1) && ((new->edge_h[w*(h+1)-1]   & EDGE_WALL) == 0x00)) ||
-                ((xv == 0 || xv == w) && (bordernum >= borderreduce))) {
-                continue;
+            /* Remove border walls up to 'borderreduce' */
+            /* Avoid two open border edges on a corner cell */
+            if (wi<vo) {
+                int xh, yh;
+                xh = wi%w; yh = wi/w;
+                /* printf("Horizontal edge at %i/%i (%i)\n",xh,yh,wi); */
+                if ((xh == 0     && yh == 0 && ((new->edge_v[0]           & EDGE_WALL) == 0x00)) ||
+                    (xh == (w-1) && yh == 0 && ((new->edge_v[w]           & EDGE_WALL) == 0x00)) ||
+                    (xh == 0     && yh == h && ((new->edge_v[w*h]         & EDGE_WALL) == 0x00)) ||
+                    (xh == (w-1) && yh == h && ((new->edge_v[(w+1)*h-1]   & EDGE_WALL) == 0x00)) ||
+                    ((yh == 0 || yh == h) && (bordernum >= borderreduce)))
+                    continue;
             }
-        }
+            else {
+                int xv, yv;
+                xv = (wi-vo)%(w+1); yv = (wi-vo)/(w+1);
+                /* printf("Vertical edge at %i/%i (%i)\n",xv,yv,wi-vo); */
+                if ((xv == 0 && yv == 0     && ((new->edge_h[0]           & EDGE_WALL) == 0x00)) ||
+                    (xv == w && yv == 0     && ((new->edge_h[w-1]         & EDGE_WALL) == 0x00)) ||
+                    (xv == 0 && yv == (h-1) && ((new->edge_h[w*h]         & EDGE_WALL) == 0x00)) ||
+                    (xv == w && yv == (h-1) && ((new->edge_h[w*(h+1)-1]   & EDGE_WALL) == 0x00)) ||
+                    ((xv == 0 || xv == w) && (bordernum >= borderreduce))) {
+                    continue;
+                }
+            }
 
-        tmp = dup_state(new);
-        /* Remove interior wall */
-        if (wi<vo) tmp->edge_h[wi]    = EDGE_NONE;
-        else       tmp->edge_v[wi-vo] = EDGE_NONE;
-        
-        if (alcazar_solve(tmp, params->difficulty) == SOLVED) {
-            /* printf("Remove edge at %i\n", wi); */
-            if (wi<vo) new->edge_h[wi]    = EDGE_NONE;
-            else       new->edge_v[wi-vo] = EDGE_NONE;
-            if (wi<vo && (wi/w == 0 || wi/w == h)) bordernum++;
-            else if ((wi-vo)%(w+1) == 0 || (wi-vo)%(w+1) == w) bordernum++;
+            tmp = dup_state(new);
+            /* Remove interior wall */
+            if (wi<vo) tmp->edge_h[wi]    = EDGE_NONE;
+            else       tmp->edge_v[wi-vo] = EDGE_NONE;
+            
+            if (alcazar_solve(tmp, params->difficulty, false) == SOLVED) {
+                /* printf("Remove edge at %i\n", wi); */
+                if (wi<vo) new->edge_h[wi]    = EDGE_NONE;
+                else       new->edge_v[wi-vo] = EDGE_NONE;
+                if (wi<vo && (wi/w == 0 || wi/w == h)) bordernum++;
+                else if ((wi-vo)%(w+1) == 0 || (wi-vo)%(w+1) == w) bordernum++;
+            }
+            /* else printf("Keep edge at %i\n", wi); */
+            free_state(tmp);
         }
-        /* else printf("Keep edge at %i\n", wi); */
+        printf("Removed %i border walls\n", bordernum);
+        print_grid(new);
+        if (params->difficulty == DIFF_EASY) break;
+        tmp = dup_state(new);
+        result = alcazar_solve(tmp, params->difficulty-1, false);
         free_state(tmp);
+        if (result == SOLVED) {
+            printf("Puzzle too easy - continue\n");
+            free_state(new);
+            continue;
+        }
+        break;
     }
-    /* printf("Removed %i border walls\n", bordernum); */
-    print_grid(new);
+
     /* Encode walls */
     desc = snewn((w+1)*h + w*(h+1) + (w*h) + 1, char);
     e = desc;
@@ -813,7 +940,7 @@ static char *solve_game(const game_state *state, const game_state *currstate,
     int voff = w*(h+1);
     
     game_state *solve_state = dup_game(state);
-    alcazar_solve(solve_state, DIFF_HARD);
+    alcazar_solve(solve_state, DIFF_HARD, true);
     p += sprintf(p, "S");
     for (i = 0; i < w*(h+1); i++) {
         if (solve_state->edge_h[i] == EDGE_WALL)
@@ -960,7 +1087,7 @@ static char *interpret_move(const game_state *state, game_ui *ui,
             else                       direction = (x < cx) ? L : R;
         }
 
-        printf("Click on %i/%i (%i/%i) direction %i\n",fx,fy,cx,cy,direction);
+        // printf("Click on %i/%i (%i/%i) direction %i\n",fx,fy,cx,cy,direction);
 
 
         if (direction == U || direction == D) {
@@ -994,7 +1121,7 @@ static game_state *execute_move(const game_state *state, const char *move) {
     int w = state->w;
     int h = state->h;
     game_state *ret = dup_game(state);
-    printf("Move: '%s'\n", move);
+    // printf("Move: '%s'\n", move);
 
     while (*move) {
         c = *move;
@@ -1369,16 +1496,16 @@ int main(int argc, char **argv) {
     rs = random_new((void*)&seed, sizeof(time_t));
     /* rs = random_new("123455", 6); */
     p = default_params();
-    p->w = 3;
-    p->h = 4;
-    p->difficulty = DIFF_EASY;
+    p->w = 6;
+    p->h = 5;
+    p->difficulty = DIFF_NORMAL;
 
-    for (i=0;i<1;i++) {
+    for (i=0;i<1000;i++) {
         desc = new_game_desc(p, rs, NULL, 0);
         printf("%s\n", desc);
         state = new_game(NULL, p, desc);
-        print_grid(state);
-        alcazar_solve(state, DIFF_HARD);
+        // print_grid(state);
+        alcazar_solve(state, DIFF_NORMAL, false);
         print_grid(state);
         free_state(state);
         sfree(desc);
