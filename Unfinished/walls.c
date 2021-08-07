@@ -20,8 +20,8 @@
 #define ENCODE(upper,title,lower) #lower
 #define CONFIG(upper,title,lower) ":" #title
 enum { DIFFLIST(ENUM) DIFFCOUNT };
-static char const *const alcazar_diffnames[] = { DIFFLIST(TITLE) "(count)" };
-static char const alcazar_diffchars[] = DIFFLIST(ENCODE);
+static char const *const walls_diffnames[] = { DIFFLIST(TITLE) "(count)" };
+static char const walls_diffchars[] = DIFFLIST(ENCODE);
 #define DIFFCONFIG DIFFLIST(CONFIG)
 
 #define BLANK (0x00)
@@ -35,8 +35,7 @@ static char const alcazar_diffchars[] = DIFFLIST(ENCODE);
 #define EDGE_PATH       (0x02)
 #define EDGE_FIXED      (0x04)
 #define EDGE_ERROR      (0x08)
-#define EDGE_DRAGON     (0x10)
-#define EDGE_DRAGOFF    (0x20)
+#define EDGE_DRAG       (0x10)
 #define EDGE_FLASH      (0x40)
 
 char DIRECTIONS[4] = {L, R, U, D};
@@ -59,6 +58,7 @@ enum {
     COL_DRAGON,
     COL_DRAGOFF,
     COL_ERROR,
+    COL_CURSOR,
     COL_FLASH,
     NCOLOURS
 };
@@ -80,7 +80,7 @@ struct game_state {
 };
 
 #define DEFAULT_PRESET 0
-static const struct game_params alcazar_presets[] = {
+static const struct game_params walls_presets[] = {
     {4, 3,  DIFF_EASY},
     {4, 4,  DIFF_NORMAL},
     {6, 6,  DIFF_NORMAL},
@@ -91,7 +91,7 @@ static const struct game_params alcazar_presets[] = {
 
 static game_params *default_params(void) {
     game_params *ret = snew(game_params);
-    *ret = alcazar_presets[DEFAULT_PRESET];
+    *ret = walls_presets[DEFAULT_PRESET];
     return ret;
 }
 
@@ -99,15 +99,15 @@ static bool game_fetch_preset(int i, char **name, game_params **params) {
     game_params *ret;
     char buf[64];
 
-    if (i < 0 || i >= lenof(alcazar_presets)) return false;
+    if (i < 0 || i >= lenof(walls_presets)) return false;
 
     ret = default_params();
-    *ret = alcazar_presets[i]; /* struct copy */
+    *ret = walls_presets[i]; /* struct copy */
     *params = ret;
 
     sprintf(buf, "%dx%d %s",
             ret->w, ret->h,
-            alcazar_diffnames[ret->difficulty]);
+            walls_diffnames[ret->difficulty]);
     *name = dupstr(buf);
 
     return true;
@@ -138,7 +138,7 @@ static void decode_params(game_params *params, char const *string) {
         int i;
         string++;
         for (i = 0; i < DIFFCOUNT; i++)
-            if (*string == alcazar_diffchars[i])
+            if (*string == walls_diffchars[i])
                 params->difficulty = i;
         if (*string) string++;
     }
@@ -150,7 +150,7 @@ static char *encode_params(const game_params *params, bool full) {
     sprintf(buf, "%dx%d", params->w, params->h);
     if (full)
         sprintf(buf + strlen(buf), "d%c",
-                alcazar_diffchars[params->difficulty]);
+                walls_diffchars[params->difficulty]);
     return dupstr(buf);
 }
 
@@ -456,7 +456,7 @@ bool solve_single_cells(game_state *state, struct solver_scratch *scratch) {
 }
 
 bool solve_loops(game_state *state, struct solver_scratch *scratch) {
-    int i,j,x,y,p,idx;
+    int i,x,y,p,idx;
     unsigned char *edges[4];
     unsigned char wall_count, free_count;
     int dsf_idx[4];
@@ -542,7 +542,7 @@ bool solve_loops(game_state *state, struct solver_scratch *scratch) {
     return changed;
 }
 
-int alcazar_solve(game_state *state, int difficulty, bool verbose) {
+int walls_solve(game_state *state, int difficulty, bool verbose) {
     struct solver_scratch *scratch = snew(struct solver_scratch);
     scratch->loopdsf = snewn(state->w*state->h, int);
     dsf_init(scratch->loopdsf, state->w*state->h);
@@ -826,7 +826,7 @@ static char *new_game_desc(const game_params *params, random_state *rs,
             if (wi<vo) tmp->edge_h[wi]    = EDGE_NONE;
             else       tmp->edge_v[wi-vo] = EDGE_NONE;
             
-            if (alcazar_solve(tmp, params->difficulty, false) == SOLVED) {
+            if (walls_solve(tmp, params->difficulty, false) == SOLVED) {
                 /* printf("Remove edge at %i\n", wi); */
                 if (wi<vo) new->edge_h[wi]    = EDGE_NONE;
                 else       new->edge_v[wi-vo] = EDGE_NONE;
@@ -840,7 +840,7 @@ static char *new_game_desc(const game_params *params, random_state *rs,
         print_grid(new);
         if (params->difficulty == DIFF_EASY) break;
         tmp = dup_state(new);
-        result = alcazar_solve(tmp, params->difficulty-1, false);
+        result = walls_solve(tmp, params->difficulty-1, false);
         free_state(tmp);
         if (result == SOLVED) {
             printf("Puzzle too easy - continue\n");
@@ -940,7 +940,7 @@ static char *solve_game(const game_state *state, const game_state *currstate,
     int voff = w*(h+1);
     
     game_state *solve_state = dup_game(state);
-    alcazar_solve(solve_state, DIFF_HARD, true);
+    walls_solve(solve_state, DIFF_HARD, true);
     p += sprintf(p, "S");
     for (i = 0; i < w*(h+1); i++) {
         if (solve_state->edge_h[i] == EDGE_WALL)
@@ -1013,26 +1013,34 @@ static char *game_text_format(const game_state *state) {
 
 struct game_ui {
     int *dragcoords;       /* list of (y*w+x) coords in drag so far */
-    int ndragcoords;       /* number of entries in dragcoords.
-                            * 0 = click but no drag yet. -1 = no drag at all */
-    int clickx, clicky;    /* pixel position of initial click */
+    int ndragcoords;       /* number of entries in dragcoords. */
+    unsigned char dragdir; /* Current direction of drag */
 
     int curx, cury;        /* grid position of keyboard cursor */
     bool cursor_active;    /* true if cursor is shown */
+
     bool show_grid;        /* true if checkerboard grid is shown */
 };
 
 
 static game_ui *new_ui(const game_state *state) {
+    int w = state->w;
+    int h = state->h;
     game_ui *ui = snew(game_ui);
 
+    ui->dragcoords = snewn((8*w+5)*(8*h+5), int);
+    ui->ndragcoords = -1;
+    ui->dragdir = BLANK;
+    
     ui->cursor_active = false;
+    ui->curx = ui->cury = 0;
+    
     ui->show_grid = true;
     return ui;
 }
 
 static void free_ui(game_ui *ui) {
-
+    sfree(ui->dragcoords);
     sfree(ui);
 }
 
@@ -1049,11 +1057,18 @@ static void game_changed_state(game_ui *ui, const game_state *oldstate,
 
 #define PREFERRED_TILE_SIZE (8)
 #define TILESIZE (ds->tilesize)
-#define BORDER (9*TILESIZE/2)
+#define BORDER (5*TILESIZE/2)
 
 #define COORD(x) ( (x) * 8 * TILESIZE + BORDER )
 #define CENTERED_COORD(x) ( COORD(x) + 4*TILESIZE )
 #define FROMCOORD(x) ( ((x) < BORDER) ? -1 : ( ((x) - BORDER) / (8 * TILESIZE) ) )
+
+#define CELLCOORD(x) ( (x) * TILESIZE )
+#define FROMCELLCOORD(x) ( (x) / TILESIZE )
+
+#define KEY_DIRECTION(btn) (\
+    (btn) == CURSOR_DOWN ? D : (btn) == CURSOR_UP ? U :\
+    (btn) == CURSOR_LEFT ? L : R)
 
 struct game_drawstate {
     int tilesize;
@@ -1062,11 +1077,43 @@ struct game_drawstate {
     unsigned short *cell;
 };
 
+static char *mark_in_direction(const game_state *state, int x, int y, int dir,
+                               bool primary, char *buf) {
+    int w = state->w;
+    int h = state->h;
+    int edge;
+
+    if (dir == U || dir == D) {
+        edge = dir == U ? x+y*w : x+(y+1)*w;
+        if (((state->edge_h[edge] & EDGE_FIXED) > 0x00) ||
+            (!primary && (state->edge_h[edge] & EDGE_PATH) > 0x00) || 
+             (primary && (state->edge_h[edge] & EDGE_WALL) > 0x00))
+            return UI_UPDATE;
+        if ((primary && (state->edge_h[edge] & EDGE_PATH) > 0x00) || 
+            (!primary && (state->edge_h[edge] & EDGE_WALL) > 0x00))
+             sprintf(buf,"C%d",edge);
+        else sprintf(buf,"%c%d", primary ? 'P' : 'W', edge);
+    }
+    else {
+        edge = dir == L ? x+y*(w+1) : (x+1)+y*(w+1);
+        if (((state->edge_v[edge] & EDGE_FIXED) > 0x00) ||
+            (!primary && (state->edge_v[edge] & EDGE_PATH) > 0x00) || 
+            (primary && (state->edge_v[edge] & EDGE_WALL) > 0x00))
+            return UI_UPDATE;
+        if ((primary && (state->edge_v[edge] & EDGE_PATH) > 0x00) || 
+            (!primary && (state->edge_v[edge] & EDGE_WALL) > 0x00))
+            sprintf(buf,"C%d",edge+w*(h+1));
+        else sprintf(buf,"%c%d", primary ? 'P' : 'W', edge+w*(h+1));
+    }
+    return dupstr(buf);
+}
+
 static char *interpret_move(const game_state *state, game_ui *ui,
                             const game_drawstate *ds,
                             int x, int y, int button) {
-
     char buf[80];
+    char *move;
+
     int w = state->w;
     int h = state->h;
     int fx = FROMCOORD(x);
@@ -1074,38 +1121,51 @@ static char *interpret_move(const game_state *state, game_ui *ui,
     int cx = CENTERED_COORD(fx);
     int cy = CENTERED_COORD(fy);
 
+    bool shift = button & MOD_SHFT, control = button & MOD_CTRL;
+    button &= ~MOD_MASK;
+
     if (button == LEFT_BUTTON || button == RIGHT_BUTTON) {
-        int direction, edge;
-        if ((fx<0 && fy<0) || (fx>=w && fy<0) || (fx<0 && fy>=h) || (fx>=w && fy>=h)) return NULL;
-        if      (fx<0 && x > cx)  direction = R;
-        else if (fx>=w && x < cx) direction = L;
-        else if (fy<0 && y > cy)  direction = D;
-        else if (fy>=h && y < cy) direction = U;
-        else if (fx<0 || fx>=w || fy<0 || fy >=h) return NULL;
-        else {
-            if (abs(x-cx) < abs(y-cy)) direction = (y < cy) ? U : D;
-            else                       direction = (x < cx) ? L : R;
-        }
-
-        // printf("Click on %i/%i (%i/%i) direction %i\n",fx,fy,cx,cy,direction);
-
-
-        if (direction == U || direction == D) {
-            edge = direction == U ? fx+fy*w : fx+(fy+1)*w;
-            if ((state->edge_h[edge] & EDGE_FIXED) > 0x00) return NULL;
-            if ((state->edge_h[edge] & EDGE_PATH) > 0x00 || 
-                (state->edge_h[edge] & EDGE_WALL) > 0x00) sprintf(buf,"C%d",edge);
-            else sprintf(buf,"%c%d",(button == LEFT_BUTTON) ? 'P' : 'W', edge);
+        int dir;
+        ui->cursor_active = false;
+        if (ui->ndragcoords > 0 ) {
+            ui->ndragcoords = -1;
+            return UI_UPDATE;
         }
         else {
-            edge = direction == L ? fx+fy*(w+1) : (fx+1)+fy*(w+1);
-            if ((state->edge_v[edge] & EDGE_FIXED) > 0x00) return NULL;
-            if ((state->edge_v[edge] & EDGE_PATH) > 0x00 || 
-                (state->edge_v[edge] & EDGE_WALL) > 0x00) sprintf(buf,"C%d",edge+w*(h+1));
-            else sprintf(buf,"%c%d",(button == LEFT_BUTTON) ? 'P' : 'W', edge+w*(h+1));
+            ui->ndragcoords = -1;
+            printf("Clicked on cell %i/%i\n",fx,fy);
+            if ((fx<0 && fy<0) || (fx>=w && fy<0) || (fx<0 && fy>=h) || (fx>=w && fy>=h)) return NULL;
+            if      (fx<0 && x > cx)  dir = R;
+            else if (fx>=w && x < cx) dir = L;
+            else if (fy<0 && y > cy)  dir = D;
+            else if (fy>=h && y < cy) dir = U;
+            else if (fx<0 || fx>=w || fy<0 || fy >=h) return NULL;
+            else {
+                if (abs(x-cx) < abs(y-cy)) dir = (y < cy) ? U : D;
+                else                       dir = (x < cx) ? L : R;
+            }
+            return mark_in_direction(state, fx, fy, dir, button == LEFT_BUTTON, buf);
         }
-        return dupstr(buf);
     }
+
+    if (IS_CURSOR_MOVE(button)) {
+        if (!ui->cursor_active) ui->cursor_active = true;
+        else if (control || shift) {
+            if (ui->ndragcoords > 0) return NULL;
+            ui->ndragcoords = -1;
+            move = mark_in_direction(state, ui->curx, ui->cury, KEY_DIRECTION(button), control, buf);
+            if (control && !shift && *move)
+                move_cursor(button, &ui->curx, &ui->cury, w, h, false);
+            return move;
+        }
+        else {
+            move_cursor(button, &ui->curx, &ui->cury, w, h, false);
+            /* if (ui->ndragcoords >= 0)
+                update_ui_drag(state, ui, ui->curx, ui->cury); */
+        }
+        return UI_UPDATE;
+    }
+
 
     if (button == 'G' || button == 'g') {
         ui->show_grid = !ui->show_grid;
@@ -1131,7 +1191,10 @@ static game_state *execute_move(const game_state *state, const char *move) {
         } 
         else if (c == 'W' || c == 'P' || c == 'C') {
             move++;
-            if (sscanf(move, "%d%n", &edge, &n) < 1) goto badmove;
+            if (sscanf(move, "%d%n", &edge, &n) < 1) {
+                free_game(ret);
+                return NULL;
+            }
             newedge = (c=='W') ? EDGE_WALL :
                       (c=='P') ? EDGE_PATH :
                                  EDGE_NONE;
@@ -1141,17 +1204,15 @@ static game_state *execute_move(const game_state *state, const char *move) {
         }
         if (*move == ';')
             move++;
-        else if (*move)
-            goto badmove;
+        else if (*move) {
+            free_game(ret);
+            return NULL;
+        }
     }
 
     if (check_solution(ret, true) == SOLVED) ret->completed = true;
 
     return ret;
-
-badmove:
-    free_game(ret);
-    return NULL;
 }
 
 /* ----------------------------------------------------------------------
@@ -1164,8 +1225,8 @@ static void game_compute_size(const game_params *params, int tilesize,
     struct { int tilesize; } ads, *ds = &ads;
     ads.tilesize = tilesize;
 
-    *x = (8 * (params->w) + 7) * TILESIZE;
-    *y = (8 * (params->h) + 7) * TILESIZE;
+    *x = (8 * (params->w) + 5) * TILESIZE;
+    *y = (8 * (params->h) + 5) * TILESIZE;
 }
 
 static void game_set_size(drawing *dr, game_drawstate *ds,
@@ -1190,6 +1251,10 @@ static float *game_colours(frontend *fe, int *ncolours) {
     ret[COL_FLOOR_B * 3 + 1] = 0.6F;
     ret[COL_FLOOR_B * 3 + 2] = 0.6F;
 
+    ret[COL_CURSOR * 3 + 0] = 0.4F;
+    ret[COL_CURSOR * 3 + 1] = 0.4F;
+    ret[COL_CURSOR * 3 + 2] = 0.4F;
+
     ret[COL_FIXED * 3 + 0] = 0.0F;
     ret[COL_FIXED * 3 + 1] = 0.0F;
     ret[COL_FIXED * 3 + 2] = 0.0F;
@@ -1206,13 +1271,13 @@ static float *game_colours(frontend *fe, int *ncolours) {
     ret[COL_PATH * 3 + 1] = 0.1F;
     ret[COL_PATH * 3 + 2] = 0.9F;
 
-    ret[COL_DRAGON * 3 + 0] = 1.0F;
+    ret[COL_DRAGON * 3 + 0] = 0.0F;
     ret[COL_DRAGON * 3 + 1] = 0.0F;
     ret[COL_DRAGON * 3 + 2] = 1.0F;
 
     ret[COL_DRAGOFF * 3 + 0] = 0.5F;
-    ret[COL_DRAGOFF * 3 + 1] = 0.0F;
-    ret[COL_DRAGOFF * 3 + 2] = 0.5F;
+    ret[COL_DRAGOFF * 3 + 1] = 0.5F;
+    ret[COL_DRAGOFF * 3 + 2] = 1.0F;
 
     ret[COL_ERROR * 3 + 0] = 1.0F;
     ret[COL_ERROR * 3 + 1] = 0.0F;
@@ -1237,9 +1302,9 @@ static game_drawstate *game_new_drawstate(drawing *dr, const game_state *state) 
     ds->w = w;
     ds->h = h;
     ds->tainted = true;
-    ds->cell   = snewn((8*w+7)*(8*h+7), unsigned short);
+    ds->cell   = snewn((8*w+5)*(8*h+5), unsigned short);
 
-    for (i=0;i<(8*w+7)*(8*h+7); i++) ds->cell[i] = 0x0000;
+    for (i=0;i<(8*w+5)*(8*h+5); i++) ds->cell[i] = 0x0000;
 
     return ds;
 }
@@ -1253,8 +1318,8 @@ static void draw_cell(drawing *dr, game_drawstate *ds, int pos) {
     int i;
     int dx, dy, col;
     int w = ds->w;
-    int x = pos%(8*w+7);
-    int y = pos/(8*w+7);
+    int x = pos%(8*w+5);
+    int y = pos/(8*w+5);
     int ox = x*ds->tilesize;
     int oy = y*ds->tilesize;
     int ts2 = (ds->tilesize+1)/2;
@@ -1267,6 +1332,7 @@ static void draw_cell(drawing *dr, game_drawstate *ds, int pos) {
     else if ((ds->cell[pos] & EDGE_PATH) == EDGE_PATH) {
         draw_rect(dr, ox, oy, ds->tilesize, ds->tilesize,
             (ds->cell[pos] & EDGE_FLASH)>0 ? COL_FLASH : 
+            (ds->cell[pos] & EDGE_DRAG) >0 ? COL_DRAGOFF :
             (ds->cell[pos] & EDGE_ERROR)>0 ? COL_ERROR :
                                              COL_PATH);
     }
@@ -1277,9 +1343,11 @@ static void draw_cell(drawing *dr, game_drawstate *ds, int pos) {
             else if (i==1) { dx = ox;     dy = oy+ts2; }
             else if (i==2) { dx = ox+ts2; dy = oy; }
             else           { dx = ox+ts2; dy = oy+ts2; }
-            col = (bg==0x00) ? COL_BACKGROUND :
+            col = (ds->cell[pos] & EDGE_DRAG) >0 ? COL_DRAGON :
+                  (bg==0x00) ? COL_BACKGROUND :
                   (bg==0x01) ? COL_FLOOR_A :
-                               COL_FLOOR_B;
+                  (bg==0x02) ? COL_FLOOR_B :
+                               COL_CURSOR;
             draw_rect(dr, dx, dy, ts2, ts2, col);
         }
         if ((ds->cell[pos] & EDGE_WALL) == EDGE_WALL) {
@@ -1308,6 +1376,8 @@ static void draw_cell(drawing *dr, game_drawstate *ds, int pos) {
     unclip(dr);
 }
 
+#define CURSOR(x,y) (ui->cursor_active && (x) == ui->curx && (y) == ui->cury)
+
 static void game_redraw(drawing *dr, game_drawstate *ds,
                         const game_state *oldstate, const game_state *state,
                         int dir, const game_ui *ui,
@@ -1316,13 +1386,17 @@ static void game_redraw(drawing *dr, game_drawstate *ds,
     unsigned short *newcell;
     bool flash = (bool)((int)(flashtime * 5 / FLASH_TIME) % 2);
     unsigned short flashflag = (flashtime > 0.0 && flash) ? EDGE_FLASH : EDGE_NONE;
-
     w = state->w; h = state->h;
-    newcell = snewn((8*w+7)*(8*h+7), unsigned short);
-    for (i=0;i<((8*w)+7)*((8*h)+7); i++) {
-        x = i%(8*w+7)-4; y = i/(8*w+7)-4;
+    newcell = snewn((8*w+5)*(8*h+5), unsigned short);
+    for (i=0;i<((8*w)+5)*((8*h)+5); i++) newcell[i] = 0x0000;
+
+    if (ui->ndragcoords > 0)
+        for (i=0;i<ui->ndragcoords;i++)
+            newcell[ui->dragcoords[i]] |= EDGE_DRAG;
+    
+    for (i=0;i<((8*w)+5)*((8*h)+5); i++) {
+        x = i%(8*w+5)-2; y = i/(8*w+5)-2;
         cx = x/8; cy = y/8;
-        newcell[i] = 0x0000;
 
         /* Corner border cells. Unused. */
         if ((x<0 && y<0) || (x<0 && y>8*h) || (x>8*w && y<0) || (x>8*w && y>8*h)) {}
@@ -1346,10 +1420,10 @@ static void game_redraw(drawing *dr, game_drawstate *ds,
         /* 4-Corner cells */
         else if ((x%8 == 0) && (y%8 == 0)) {
             if (ui->show_grid) {
-                if (cx > 0 && cy > 0) newcell[i] |= ((cx-1)^(cy-1))&1 ? 0x0100:0x0200;
-                if (cx > 0 && cy < h) newcell[i] |= ((cx-1)^ cy)   &1 ? 0x0400:0x0800;
-                if (cx < w && cy > 0) newcell[i] |= ( cx   ^(cy-1))&1 ? 0x1000:0x2000;
-                if (cx < w && cy < h) newcell[i] |= ( cx   ^ cy)   &1 ? 0x4000:0x8000;
+                if (cx > 0 && cy > 0) newcell[i] |= CURSOR(cx-1,cy-1) ? 0x0300 : ((cx-1)^(cy-1))&1 ? 0x0100:0x0200;
+                if (cx > 0 && cy < h) newcell[i] |= CURSOR(cx-1,cy)   ? 0x0c00 : ((cx-1)^ cy)   &1 ? 0x0400:0x0800;
+                if (cx < w && cy > 0) newcell[i] |= CURSOR(cx,cy-1)   ? 0x3000 : ( cx   ^(cy-1))&1 ? 0x1000:0x2000;
+                if (cx < w && cy < h) newcell[i] |= CURSOR(cx,cy)     ? 0xc000 : ( cx   ^ cy)   &1 ? 0x4000:0x8000;
             }
             if (cx > 0) newcell[i] |= state->edge_h[(cx-1)+cy*w]     & (EDGE_WALL | EDGE_FIXED);
             if (cx < w) newcell[i] |= state->edge_h[cx+cy*w]         & (EDGE_WALL | EDGE_FIXED);
@@ -1360,8 +1434,8 @@ static void game_redraw(drawing *dr, game_drawstate *ds,
         /* Horizontal edge cells */
         else if (y%8 == 0) {
             if (ui->show_grid) {
-                if (cy > 0) newcell[i] |= (cx^(cy-1))&1 ? 0x1100:0x2200;
-                if (cy < h) newcell[i] |= (cx^ cy)   &1 ? 0x4400:0x8800;
+                if (cy > 0) newcell[i] |= CURSOR(cx,cy-1) ? 0x3300 : (cx^(cy-1))&1 ? 0x1100:0x2200;
+                if (cy < h) newcell[i] |= CURSOR(cx,cy)   ? 0xcc00 : (cx^ cy)   &1 ? 0x4400:0x8800;
             }
             newcell[i] |= state->edge_h[cx+cy*w] & (EDGE_WALL|EDGE_FIXED);
             if (x%8==4)
@@ -1371,8 +1445,8 @@ static void game_redraw(drawing *dr, game_drawstate *ds,
         /* Vertical edge cells */
         else if (x%8 == 0) {
             if (ui->show_grid) {
-                if (cx > 0) newcell[i] |= ((cx-1)^cy)&1 ? 0x0500:0x0a00;
-                if (cx < w) newcell[i] |= ( cx   ^cy)&1 ? 0x5000:0xa000;
+                if (cx > 0) newcell[i] |= CURSOR(cx-1,cy) ? 0x0f00 : ((cx-1)^cy)&1 ? 0x0500:0x0a00;
+                if (cx < w) newcell[i] |= CURSOR(cx,cy)   ? 0xf000 : ( cx   ^cy)&1 ? 0x5000:0xa000;
             }
             newcell[i] |= state->edge_v[cx+cy*(w+1)] & (EDGE_WALL|EDGE_FIXED);
             if (y%8==4)
@@ -1382,7 +1456,7 @@ static void game_redraw(drawing *dr, game_drawstate *ds,
         /* Path cells */
         else {
             if (ui->show_grid) 
-                for (j=0;j<4;j++) newcell[i] |= ((cx^cy)&1 ? 0x01:0x02) << (8+2*j);
+                for (j=0;j<4;j++) newcell[i] |= (CURSOR(cx,cy) ? 0x03 : (cx^cy)&1 ? 0x01:0x02) << (8+2*j);
             if (x%8==4 && y%8<=4)
                 newcell[i] |= flashflag|(state->edge_h[cx+cy*w]         & (EDGE_PATH|EDGE_ERROR));
             if (x%8==4 && y%8>=4)
@@ -1393,7 +1467,7 @@ static void game_redraw(drawing *dr, game_drawstate *ds,
                 newcell[i] |= flashflag|(state->edge_v[(cx+1)+cy*(w+1)] & (EDGE_PATH|EDGE_ERROR));
         }
     }
-    for (i=0;i<((8*w)+7)*((8*h)+7); i++) {
+    for (i=0;i<((8*w)+5)*((8*h)+5); i++) {
         if (newcell[i] != ds->cell[i] || ds->tainted) {
             ds->cell[i] = newcell[i];
             draw_cell(dr, ds, i);
@@ -1422,6 +1496,11 @@ static void game_get_cursor_location(const game_ui *ui,
                                      const game_state *state,
                                      const game_params *params,
                                      int *x, int *y, int *w, int *h) {
+    if(ui->cursor_active) {
+        *x = COORD(ui->curx);
+        *y = COORD(ui->cury);
+        *w = *h = TILESIZE;
+    }
 }
 
 static int game_status(const game_state *state) {
@@ -1439,11 +1518,11 @@ static void game_print(drawing *dr, const game_state *state, int tilesize) {
 }
 
 #ifdef COMBINED
-#define thegame alcazar
+#define thegame walls
 #endif
 
 const struct game thegame = {
-    "Alcazar", "games.alcazar", "alcazar",
+    "Walls", "games.walls", "walls",
     default_params,
     game_fetch_preset, NULL,
     decode_params,
@@ -1494,7 +1573,7 @@ int main(int argc, char **argv) {
     time_t seed = time(NULL);
 
     rs = random_new((void*)&seed, sizeof(time_t));
-    /* rs = random_new("123455", 6); */
+    /* rs = random_new("123456", 6); */
     p = default_params();
     p->w = 6;
     p->h = 5;
@@ -1505,7 +1584,7 @@ int main(int argc, char **argv) {
         printf("%s\n", desc);
         state = new_game(NULL, p, desc);
         // print_grid(state);
-        alcazar_solve(state, DIFF_NORMAL, false);
+        walls_solve(state, DIFF_NORMAL, false);
         print_grid(state);
         free_state(state);
         sfree(desc);
