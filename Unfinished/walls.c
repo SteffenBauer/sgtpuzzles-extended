@@ -14,6 +14,7 @@
 #define DIFFLIST(A) \
     A(EASY,Easy,e) \
     A(NORMAL,Normal,n) \
+    A(TRICKY,Tricky,t) \
     A(HARD,Hard,h)
 #define ENUM(upper,title,lower) DIFF_ ## upper,
 #define TITLE(upper,title,lower) #title,
@@ -30,13 +31,18 @@ static char const walls_diffchars[] = DIFFLIST(ENCODE);
 #define U (0x04)
 #define D (0x08)
 
-#define EDGE_NONE       (0x00)
-#define EDGE_WALL       (0x01)
-#define EDGE_PATH       (0x02)
-#define EDGE_FIXED      (0x04)
-#define EDGE_ERROR      (0x08)
-#define EDGE_DRAG       (0x10)
-#define EDGE_FLASH      (0x40)
+#define FLAG_NONE        (0x00)
+#define FLAG_WALL        (0x01)
+#define FLAG_PATH        (0x02)
+#define FLAG_FIXED       (0x04)
+#define FLAG_ERROR       (0x08)
+#define FLAG_DRAG        (0x20)
+#define FLAG_FLASH       (0x40)
+
+#define EDGE_LEFT       (0x00010000)
+#define EDGE_RIGHT      (0x00020000)
+#define EDGE_UP         (0x00040000)
+#define EDGE_DOWN       (0x00080000)
 
 char DIRECTIONS[4] = {L, R, U, D};
 
@@ -75,18 +81,19 @@ struct game_state {
     int diff;
     unsigned char *edge_h;
     unsigned char *edge_v;
+    unsigned char *cellstate;
     bool completed;
     bool used_solve;
 };
 
-#define DEFAULT_PRESET 0
+#define DEFAULT_PRESET 1
 static const struct game_params walls_presets[] = {
     {4, 3,  DIFF_EASY},
-    {4, 4,  DIFF_NORMAL},
-    {6, 6,  DIFF_NORMAL},
-    {6, 6,  DIFF_HARD},
-    {8, 8,  DIFF_NORMAL},
-    {8, 8,  DIFF_HARD}
+    {4, 3,  DIFF_NORMAL},
+    {7, 6,  DIFF_NORMAL},
+    {7, 6,  DIFF_TRICKY},
+    {9, 8,  DIFF_NORMAL},
+    {9, 8,  DIFF_TRICKY}
 };
 
 static game_params *default_params(void) {
@@ -251,7 +258,7 @@ static int neighbour(int vertex, void *vctx) {
         return -1;
 }
 
-int check_solution(game_state *state, bool full) {
+static int check_solution(game_state *state, bool full) {
     int x,y,i;
     int count_walls;
     int count_paths;
@@ -261,10 +268,11 @@ int check_solution(game_state *state, bool full) {
     struct findloopstate *fls;
     struct neighbour_ctx ctx;
 
-    int exit_count;
+    int exit_count, exit1, exit2;
 
     int *dsf;
     int first_cell;
+    bool mark_unconnected = false;
 
     int w = state->w;
     int h = state->h;
@@ -272,8 +280,9 @@ int check_solution(game_state *state, bool full) {
 
     /* Reset error flags */
     if (full) {
-        for (i=0;i<w*(h+1);i++) state->edge_h[i] &= ~EDGE_ERROR;
-        for (i=0;i<(w+1)*h;i++) state->edge_v[i] &= ~EDGE_ERROR;
+        for (i=0;i<w*(h+1);i++) state->edge_h[i] &= ~FLAG_ERROR;
+        for (i=0;i<(w+1)*h;i++) state->edge_v[i] &= ~FLAG_ERROR;
+        for (i=0;i<(w+2)*(h+2);i++) state->cellstate[i] = FLAG_NONE;
     }
     
     /* Check if every cell has exactly two paths. Mark error flag */
@@ -286,15 +295,19 @@ int check_solution(game_state *state, bool full) {
         edges[2] = state->edge_v + y*(w+1) + x;
         edges[3] = edges[2] + 1;
         for (i=0;i<4;i++) {
-            if ((*edges[i] & EDGE_WALL) > 0x00) count_walls++;
-            if ((*edges[i] & EDGE_PATH) > 0x00) count_paths++;
+            if ((*edges[i] & FLAG_WALL) > 0x00) count_walls++;
+            if ((*edges[i] & FLAG_PATH) > 0x00) count_paths++;
         }
         if (full) {
             if (count_paths < 2) solved = AMBIGUOUS;
-            if (count_paths > 2) {
+            if (count_paths > 2 || count_walls > 2) {
                 solved = INVALID;
-                for (i=0;i<4;i++)
-                    if ((*edges[i] & EDGE_PATH) > 0x00) *edges[i] |= EDGE_ERROR;
+                state->cellstate[(x+1)+(y+1)*(w+2)] |= FLAG_ERROR;
+                for (i=0;i<4;i++) {
+                    if ((*edges[i] & FLAG_PATH) > 0x00) {
+                        *edges[i] |= FLAG_ERROR;
+                    }
+                }
             }
         }
         else if ((count_walls != 2 || count_paths != 2)) return AMBIGUOUS;
@@ -314,28 +327,33 @@ int check_solution(game_state *state, bool full) {
         edges[2] = state->edge_v + y*(w+1) + x;
         edges[3] = edges[2] + 1;
         grid->faces[i] = BLANK;
-        if ((*edges[0] & EDGE_PATH) > 0x00) grid->faces[i] |= U;
-        if ((*edges[1] & EDGE_PATH) > 0x00) grid->faces[i] |= D;
-        if ((*edges[2] & EDGE_PATH) > 0x00) grid->faces[i] |= L;
-        if ((*edges[3] & EDGE_PATH) > 0x00) grid->faces[i] |= R;
+        if ((*edges[0] & FLAG_PATH) > 0x00) grid->faces[i] |= U;
+        if ((*edges[1] & FLAG_PATH) > 0x00) grid->faces[i] |= D;
+        if ((*edges[2] & FLAG_PATH) > 0x00) grid->faces[i] |= L;
+        if ((*edges[3] & FLAG_PATH) > 0x00) grid->faces[i] |= R;
     }
     fls = findloop_new_state(w*h);
     ctx.grid = grid;
     if (findloop_run(fls, w*h, neighbour, &ctx)) {
-        for (x = 0; x < w; x++)
+        for (x = 0; x < w; x++) {
         for (y = 0; y < h; y++) {
             int u, v;
             u = y*w + x;
-            for (v = neighbour(u, &ctx); v >= 0; v = neighbour(-1, &ctx))
+            for (v = neighbour(u, &ctx); v >= 0; v = neighbour(-1, &ctx)) {
                 if (findloop_is_loop_edge(fls, u, v)) {
                     solved = INVALID;
+                    state->cellstate[(x+1)+(y+1)*(w+2)] |= FLAG_ERROR;
                     edges[0] = state->edge_h + y*w + x;
                     edges[1] = edges[0] + w;
                     edges[2] = state->edge_v + y*(w+1) + x;
                     edges[3] = edges[2] + 1;
                     for (i=0;i<4;i++)
-                        if ((*edges[i] & EDGE_PATH) > 0x00) *edges[i] |= EDGE_ERROR;
+                        if ((*edges[i] & FLAG_PATH) > 0x00) {
+                            *edges[i] |= FLAG_ERROR;
+                        }
+                    }
                 }
+            }
         }
     }
 
@@ -344,30 +362,58 @@ int check_solution(game_state *state, bool full) {
     sfree(grid);
 
     /* Check for exactly two exits */
-    exit_count = 0;
-    for (i=0;i<w;i++)            if ((state->edge_h[i] & EDGE_PATH) > 0x00) exit_count++;
-    for (i=w*h;i<w*(h+1);i++)    if ((state->edge_h[i] & EDGE_PATH) > 0x00) exit_count++;
-    for (i=0;i<(w+1)*h;i+=(w+1)) if ((state->edge_v[i] & EDGE_PATH) > 0x00) exit_count++;
-    for (i=w;i<(w+1)*h;i+=(w+1)) if ((state->edge_v[i] & EDGE_PATH) > 0x00) exit_count++;
+    exit_count = 0; exit1 = exit2 = -1;
+    for (i=0;i<w;i++)
+        if ((state->edge_h[i] & FLAG_PATH) > 0x00) {
+            exit_count++;
+            if (exit1 == -1) exit1 = i; else exit2 = i;
+        }
+    for (i=w*h;i<w*(h+1);i++)
+        if ((state->edge_h[i] & FLAG_PATH) > 0x00) {
+            exit_count++;
+            if (exit1 == -1) exit1 = i-w; else exit2 = i-w;
+        }
+    for (i=0;i<(w+1)*h;i+=(w+1))
+        if ((state->edge_v[i] & FLAG_PATH) > 0x00) {
+            exit_count++;
+            if (exit1 == -1) exit1 = w*(i/(w+1)); else exit2 = w*(i/(w+1));
+        }
+    for (i=w;i<(w+1)*h;i+=(w+1))
+        if ((state->edge_v[i] & FLAG_PATH) > 0x00) {
+            exit_count++;
+            if (exit1 == -1) exit1 = (w-1)+w*(i/(w+1)); else exit2 = (w-1)+w*(i/(w+1));
+        }
     if (exit_count < 2)
         solved = AMBIGUOUS;
     else if (exit_count > 2) {
         solved = INVALID;
         for (i=0;i<w;i++)
-            if ((state->edge_h[i] & EDGE_PATH) > 0x00) state->edge_h[i] |= EDGE_ERROR;
+            if ((state->edge_h[i] & FLAG_PATH) > 0x00) {
+                state->edge_h[i] |= FLAG_ERROR;
+                x = 1+i%w; y = i/w;
+                state->cellstate[x+y*(w+2)] |= FLAG_ERROR;
+            }
         for (i=w*h;i<w*(h+1);i++)
-            if ((state->edge_h[i] & EDGE_PATH) > 0x00) state->edge_h[i] |= EDGE_ERROR;
+            if ((state->edge_h[i] & FLAG_PATH) > 0x00) {
+                state->edge_h[i] |= FLAG_ERROR;
+                x = 1+i%w; y = 1+i/w;
+                state->cellstate[x+y*(w+2)] |= FLAG_ERROR;
+            }
         for (i=0;i<(w+1)*h;i+=(w+1))
-            if ((state->edge_v[i] & EDGE_PATH) > 0x00) state->edge_v[i] |= EDGE_ERROR;
+            if ((state->edge_v[i] & FLAG_PATH) > 0x00) {
+                state->edge_v[i] |= FLAG_ERROR;
+                x = i%(w+1); y = 1+i/(w+1);
+                state->cellstate[x+y*(w+2)] |= FLAG_ERROR;
+            }
         for (i=w;i<(w+1)*h;i+=(w+1))
-            if ((state->edge_v[i] & EDGE_PATH) > 0x00) state->edge_v[i] |= EDGE_ERROR;
+            if ((state->edge_v[i] & FLAG_PATH) > 0x00) {
+                state->edge_v[i] |= FLAG_ERROR;
+                x = 1+i%(w+1); y = 1+i/(w+1);
+                state->cellstate[x+y*(w+2)] |= FLAG_ERROR;
+            }
     }
 
-    if (solved != SOLVED) return solved;
-
-    /* Check if all cells are connected 
-     * TODO Mark unconnected cells if exit_count >=2 && dsf[exit1] == dsf[exit2]
-    */
+    /* Check if all cells are connected */
     dsf = snewn(w*h,int);
     dsf_init(dsf, w*h);
     for (y=0;y<h;y++)
@@ -377,19 +423,25 @@ int check_solution(game_state *state, bool full) {
         edges[1] = edges[0] + w;
         edges[2] = state->edge_v + y*(w+1) + x;
         edges[3] = edges[2] + 1;
-        if ((*edges[0] & EDGE_PATH) > 0x00 && y>0) dsf_merge(dsf, i, i-w);
-        if ((*edges[1] & EDGE_PATH) > 0x00 && y<h-1) dsf_merge(dsf, i, i+w);
-        if ((*edges[2] & EDGE_PATH) > 0x00 && x>0) dsf_merge(dsf, i, i-1);
-        if ((*edges[3] & EDGE_PATH) > 0x00 && x<w-1) dsf_merge(dsf, i, i+1);
+        if ((*edges[0] & FLAG_PATH) > 0x00 && y>0)   dsf_merge(dsf, i, i-w);
+        if ((*edges[1] & FLAG_PATH) > 0x00 && y<h-1) dsf_merge(dsf, i, i+w);
+        if ((*edges[2] & FLAG_PATH) > 0x00 && x>0)   dsf_merge(dsf, i, i-1);
+        if ((*edges[3] & FLAG_PATH) > 0x00 && x<w-1) dsf_merge(dsf, i, i+1);
     }
     first_cell = dsf_canonify(dsf, 0);
+    if (exit_count == 2 && dsf_canonify(dsf, exit1) == dsf_canonify(dsf, exit2)) {
+        mark_unconnected = true;
+        first_cell = dsf_canonify(dsf, exit1);
+    }
     for (i=0;i<w*h;i++) {
         if (dsf_canonify(dsf, i) != first_cell) {
             solved = INVALID;
-            break;
+            if (mark_unconnected) {
+                x = i%w; y=i/w;
+                state->cellstate[(x+1)+(y+1)*(w+2)] |= FLAG_ERROR;
+            }
         }
     }
-
     sfree(dsf);
 
     return solved;
@@ -401,7 +453,7 @@ struct solver_scratch {
     bool verbose;
 };
 
-bool solve_single_cells(game_state *state, struct solver_scratch *scratch) {
+static bool solve_single_cells(game_state *state, struct solver_scratch *scratch) {
     int i, j, x, y;
     bool changed = false;
     int w = state->w;
@@ -420,16 +472,16 @@ bool solve_single_cells(game_state *state, struct solver_scratch *scratch) {
         edges[3] = edges[2] + 1;
 
         for (i = 0; i < 4; ++i) {
-            if (*edges[i] == EDGE_NONE) available_mask |= (0x01 << i);
-            else if ((*edges[i] & EDGE_PATH) == EDGE_PATH) path_count++;
-            else if ((*edges[i] & EDGE_WALL) == EDGE_WALL) wall_count++;
+            if (*edges[i] == FLAG_NONE) available_mask |= (0x01 << i);
+            else if ((*edges[i] & FLAG_PATH) == FLAG_PATH) path_count++;
+            else if ((*edges[i] & FLAG_WALL) == FLAG_WALL) wall_count++;
         }
         if (wall_count == 2 && path_count < 2) {
             for (i = 0; i < 4; i++) {
                 if (available_mask & (0x01 << i)){ 
                     if (scratch->verbose)
                         printf("Set path in cell %i/%i at %i\n",x,y,i);
-                    *edges[i] |= EDGE_PATH;
+                    *edges[i] |= FLAG_PATH;
                     if (scratch->difficulty >= DIFF_NORMAL) {
                         j = x+y*w;
                         if (i==0 && y>0)     dsf_merge(scratch->loopdsf, j, j-w);
@@ -446,7 +498,7 @@ bool solve_single_cells(game_state *state, struct solver_scratch *scratch) {
                 if (available_mask & (0x01 << i)) {
                     if (scratch->verbose)
                         printf("Set wall in cell %i/%i at %i\n",x,y,i);
-                    *edges[i] |= EDGE_WALL;
+                    *edges[i] |= FLAG_WALL;
                 }
             }
             changed = true;
@@ -455,7 +507,7 @@ bool solve_single_cells(game_state *state, struct solver_scratch *scratch) {
     return changed;
 }
 
-bool solve_loops(game_state *state, struct solver_scratch *scratch) {
+static bool solve_loops(game_state *state, struct solver_scratch *scratch) {
     int i,x,y,p,idx;
     unsigned char *edges[4];
     unsigned char wall_count, free_count;
@@ -480,7 +532,7 @@ bool solve_loops(game_state *state, struct solver_scratch *scratch) {
             edges[2] = state->edge_v + y*(w+1) + x;
             edges[3] = edges[2] + 1;
             for (i=0;i<4;i++) {
-                if (*edges[i] == EDGE_NONE) {
+                if (*edges[i] == FLAG_NONE) {
                     free_count++;
                     idx = -1;
                     if (i==0 && y>0)     idx = dsf_canonify(scratch->loopdsf, p-w);
@@ -489,7 +541,7 @@ bool solve_loops(game_state *state, struct solver_scratch *scratch) {
                     if (i==3 && x<(w-1)) idx = dsf_canonify(scratch->loopdsf, p+1);
                     dsf_idx[i] = idx;
                 }
-                if ((*edges[i] & EDGE_WALL) == EDGE_WALL) {
+                if ((*edges[i] & FLAG_WALL) == FLAG_WALL) {
                     wall_count++;
                     dsf_idx[i] = -2;
                 }
@@ -522,7 +574,7 @@ bool solve_loops(game_state *state, struct solver_scratch *scratch) {
                 if (single_idx != -1) {
                     if (scratch->verbose)
                         printf("Loop ladder at cell %i/%i, placing edge at %i\n", x, y, single_idx);
-                    *edges[single_idx] |= EDGE_PATH;
+                    *edges[single_idx] |= FLAG_PATH;
                     for (i=0;i<4;i++) {
                         if (dsf_idx[i] != -2) {
                             if (i==0 && y>0)     dsf_merge(scratch->loopdsf, p, p-w);
@@ -542,7 +594,73 @@ bool solve_loops(game_state *state, struct solver_scratch *scratch) {
     return changed;
 }
 
-int walls_solve(game_state *state, int difficulty, bool verbose) {
+static bool check_partition(const game_state *state) {
+    int i,x,y;
+    int w = state->w;
+    int h = state->h;
+    unsigned char *edges[4];
+    int *dsf;
+    int first_cell;
+
+    /* Check if all cells can be connected */
+    dsf = snewn(w*h,int);
+    dsf_init(dsf, w*h);
+    for (y=0;y<h;y++)
+    for (x=0;x<w;x++) {
+        i = x+y*w;
+        edges[0] = state->edge_h + y*w + x;
+        edges[1] = edges[0] + w;
+        edges[2] = state->edge_v + y*(w+1) + x;
+        edges[3] = edges[2] + 1;
+        if ((*edges[0] & FLAG_WALL) == 0x00 && y>0)   dsf_merge(dsf, i, i-w);
+        if ((*edges[1] & FLAG_WALL) == 0x00 && y<h-1) dsf_merge(dsf, i, i+w);
+        if ((*edges[2] & FLAG_WALL) == 0x00 && x>0)   dsf_merge(dsf, i, i-1);
+        if ((*edges[3] & FLAG_WALL) == 0x00 && x<w-1) dsf_merge(dsf, i, i+1);
+    }
+    first_cell = dsf_canonify(dsf, 0);
+    for (i=0;i<w*h;i++) {
+        if (dsf_canonify(dsf, i) != first_cell) {
+            sfree(dsf);
+            return false;
+        }
+    }
+    sfree(dsf);
+    return true;
+}
+
+static bool solve_partitions(game_state *state, struct solver_scratch *scratch) {
+    int i;
+    int w = state->w;
+    int h = state->h;
+    for (i=0;i<w*(h+1);i++) {
+        if (state->edge_h[i] == FLAG_NONE) {
+            state->edge_h[i] = FLAG_WALL;
+            if (!check_partition(state)) {
+                if (scratch->verbose)
+                    printf("Horizontal edge at %i would partition the board -> set to path\n",i);
+                state->edge_h[i] = FLAG_PATH;
+                return true;
+            }
+            state->edge_h[i] = FLAG_NONE;
+        }
+    }
+    for (i=0;i<(w+1)*h;i++) {
+        if (state->edge_v[i] == FLAG_NONE) {
+            state->edge_v[i] = FLAG_WALL;
+            if (!check_partition(state)) {
+                if (scratch->verbose)
+                    printf("Vertical edge at %i would partition the board -> set to path\n",i);
+                state->edge_v[i] = FLAG_PATH;
+                return true;
+            }
+            state->edge_v[i] = FLAG_NONE;
+        }
+    }
+
+    return false;
+}
+
+static int walls_solve(game_state *state, int difficulty, bool verbose) {
     struct solver_scratch *scratch = snew(struct solver_scratch);
     scratch->loopdsf = snewn(state->w*state->h, int);
     dsf_init(scratch->loopdsf, state->w*state->h);
@@ -552,6 +670,7 @@ int walls_solve(game_state *state, int difficulty, bool verbose) {
     while(true) {
         if (difficulty >= DIFF_EASY   && solve_single_cells(state, scratch)) continue;
         if (difficulty >= DIFF_NORMAL && solve_loops(state, scratch)) continue;
+        if (difficulty >= DIFF_TRICKY && solve_partitions(state, scratch)) continue;
         break;
     }
 
@@ -567,7 +686,7 @@ int walls_solve(game_state *state, int difficulty, bool verbose) {
  * http://clisby.net/projects/hamiltonian_path/
  */
 
-void reverse_path(int i1, int i2, int *pathx, int *pathy) {
+static void reverse_path(int i1, int i2, int *pathx, int *pathy) {
     int i;
     int ilim = (i2-i1+1)/2;
     int temp;
@@ -582,7 +701,7 @@ void reverse_path(int i1, int i2, int *pathx, int *pathy) {
     }
 }
 
-int backbite_left(int step, int n, int *pathx, int *pathy, int w, int h) {
+static int backbite_left(int step, int n, int *pathx, int *pathy, int w, int h) {
     int neighx, neighy;
     int i, inPath = false;
     switch(step) {
@@ -611,7 +730,7 @@ int backbite_left(int step, int n, int *pathx, int *pathy, int w, int h) {
     return n;
 }
 
-int backbite_right(int step, int n, int *pathx, int *pathy, int w, int h) {
+static int backbite_right(int step, int n, int *pathx, int *pathy, int w, int h) {
     int neighx, neighy;
     int i, inPath = false;
     switch(step) {
@@ -639,13 +758,13 @@ int backbite_right(int step, int n, int *pathx, int *pathy, int w, int h) {
     return n;
 }
 
-int backbite(int n, int *pathx, int *pathy, int w, int h, random_state *rs) {
+static int backbite(int n, int *pathx, int *pathy, int w, int h, random_state *rs) {
     return (random_upto(rs, 2) == 0) ?
         backbite_left( DIRECTIONS[random_upto(rs,4)], n, pathx, pathy, w, h) :
         backbite_right(DIRECTIONS[random_upto(rs,4)], n, pathx, pathy, w, h);
 }
 
-void generate_hamiltonian_path(game_state *state, random_state *rs) {
+static void generate_hamiltonian_path(game_state *state, random_state *rs) {
     int w = state->w;
     int h = state->h;
     int *pathx = snewn(w*h, int);
@@ -674,16 +793,16 @@ void generate_hamiltonian_path(game_state *state, random_state *rs) {
         x = pos % w;
         y = pos / w;
         if (n < (w*h-1)) {
-            if      (pathx[n+1] - pathx[n] ==  1) state->edge_v[y*(w+1)+x+1] = EDGE_NONE;
-            else if (pathx[n+1] - pathx[n] == -1) state->edge_v[y*(w+1)+x]   = EDGE_NONE;
-            else if (pathy[n+1] - pathy[n] ==  1) state->edge_h[y*w+x+w]     = EDGE_NONE;
-            else if (pathy[n+1] - pathy[n] == -1) state->edge_h[y*w+x]       = EDGE_NONE;
+            if      (pathx[n+1] - pathx[n] ==  1) state->edge_v[y*(w+1)+x+1] = FLAG_NONE;
+            else if (pathx[n+1] - pathx[n] == -1) state->edge_v[y*(w+1)+x]   = FLAG_NONE;
+            else if (pathy[n+1] - pathy[n] ==  1) state->edge_h[y*w+x+w]     = FLAG_NONE;
+            else if (pathy[n+1] - pathy[n] == -1) state->edge_h[y*w+x]       = FLAG_NONE;
         }
         if (n == 0 || n == (w*h)-1) {
-            if      (pathx[n] == 0)   state->edge_v[y*(w+1)+x]   = EDGE_NONE;
-            else if (pathx[n] == w-1) state->edge_v[y*(w+1)+x+1] = EDGE_NONE;
-            else if (pathy[n] == 0)   state->edge_h[y*w+x]       = EDGE_NONE;
-            else if (pathy[n] == h-1) state->edge_h[y*w+x+w]     = EDGE_NONE;
+            if      (pathx[n] == 0)   state->edge_v[y*(w+1)+x]   = FLAG_NONE;
+            else if (pathx[n] == w-1) state->edge_v[y*(w+1)+x+1] = FLAG_NONE;
+            else if (pathy[n] == 0)   state->edge_h[y*w+x]       = FLAG_NONE;
+            else if (pathy[n] == h-1) state->edge_h[y*w+x+w]     = FLAG_NONE;
         }
     }
 
@@ -704,9 +823,11 @@ static game_state *new_state(const game_params *params) {
 
     state->edge_h = snewn(state->w*(state->h + 1), unsigned char);
     state->edge_v = snewn((state->w + 1)*state->h, unsigned char);
+    state->cellstate = snewn((state->w + 2)*(state->h + 2), unsigned char);
 
-    memset(state->edge_h, EDGE_WALL | EDGE_FIXED, state->w*(state->h+1)*sizeof(unsigned char));
-    memset(state->edge_v, EDGE_WALL | EDGE_FIXED, (state->w+1)*state->h*sizeof(unsigned char));
+    memset(state->edge_h, FLAG_WALL | FLAG_FIXED, state->w*(state->h+1)*sizeof(unsigned char));
+    memset(state->edge_v, FLAG_WALL | FLAG_FIXED, (state->w+1)*state->h*sizeof(unsigned char));
+    memset(state->cellstate, FLAG_NONE, (state->w+2)*(state->h+2)*sizeof(unsigned char));
 
     return state;
 }
@@ -721,9 +842,11 @@ static game_state *dup_state(const game_state *state) {
 
     ret->edge_h = snewn(state->w*(state->h + 1), unsigned char);
     ret->edge_v = snewn((state->w + 1)*state->h, unsigned char);
+    ret->cellstate = snewn((state->w + 2)*(state->h + 2), unsigned char);
 
     memcpy(ret->edge_h, state->edge_h, state->w*(state->h + 1) * sizeof(unsigned char));
     memcpy(ret->edge_v, state->edge_v, (state->w + 1)*state->h * sizeof(unsigned char));
+    memcpy(ret->cellstate, state->cellstate, (state->w+2)*(state->h+2)*sizeof(unsigned char));
 
     return ret;
 }
@@ -731,15 +854,16 @@ static game_state *dup_state(const game_state *state) {
 static void free_state(game_state *state) {
     sfree(state->edge_v);
     sfree(state->edge_h);
+    sfree(state->cellstate);
     sfree(state);
 }
 
 static void count_edges(unsigned char edge, char **e, int *erun, int *wrun) {
-    if ((edge & EDGE_WALL) == 0 && *wrun > 0) {
+    if ((edge & FLAG_WALL) == 0 && *wrun > 0) {
         *e += sprintf(*e, "%d", *wrun);
         *wrun = *erun = 0;
     }
-    else if ((edge & EDGE_WALL) && *erun > 0) {
+    else if ((edge & FLAG_WALL) && *erun > 0) {
         while (*erun >= 26) {
             *(*e)++ = 'z';
             *erun -= 26;
@@ -750,7 +874,7 @@ static void count_edges(unsigned char edge, char **e, int *erun, int *wrun) {
             *erun = 0; *wrun = -1;
         }
     }
-    if(edge & EDGE_WALL) (*wrun)++;
+    if(edge & FLAG_WALL) (*wrun)++;
     else                 (*erun)++;
 }
 
@@ -784,10 +908,10 @@ static char *new_game_desc(const game_params *params, random_state *rs,
         /* print_grid(new); */
 
         for (i=0;i<w*(h+1);i++)
-            if ((new->edge_h[i] & EDGE_WALL) > 0x00)
+            if ((new->edge_h[i] & FLAG_WALL) > 0x00)
                 wallidx[wallnum++] = i;
         for (i=0;i<(w+1)*h;i++)
-            if ((new->edge_v[i] & EDGE_WALL) > 0x00)
+            if ((new->edge_v[i] & FLAG_WALL) > 0x00)
                 wallidx[wallnum++] = i+vo;
 
         shuffle(wallidx, wallnum, sizeof(int), rs);
@@ -801,42 +925,45 @@ static char *new_game_desc(const game_params *params, random_state *rs,
                 int xh, yh;
                 xh = wi%w; yh = wi/w;
                 /* printf("Horizontal edge at %i/%i (%i)\n",xh,yh,wi); */
-                if ((xh == 0     && yh == 0 && ((new->edge_v[0]           & EDGE_WALL) == 0x00)) ||
-                    (xh == (w-1) && yh == 0 && ((new->edge_v[w]           & EDGE_WALL) == 0x00)) ||
-                    (xh == 0     && yh == h && ((new->edge_v[w*h]         & EDGE_WALL) == 0x00)) ||
-                    (xh == (w-1) && yh == h && ((new->edge_v[(w+1)*h-1]   & EDGE_WALL) == 0x00)) ||
-                    ((yh == 0 || yh == h) && (bordernum >= borderreduce)))
+                if ((xh == 0     && yh == 0 && ((new->edge_v[0]           & FLAG_WALL) == 0x00)) ||
+                    (xh == (w-1) && yh == 0 && ((new->edge_v[w]           & FLAG_WALL) == 0x00)) ||
+                    (xh == 0     && yh == h && ((new->edge_v[(w+1)*(h-1)] & FLAG_WALL) == 0x00)) ||
+                    (xh == (w-1) && yh == h && ((new->edge_v[(w+1)*h-1]   & FLAG_WALL) == 0x00))) {
                     continue;
+                }
+                if ((yh == 0 || yh == h) && (bordernum >= borderreduce)) {
+                    continue;
+                }
             }
             else {
                 int xv, yv;
                 xv = (wi-vo)%(w+1); yv = (wi-vo)/(w+1);
                 /* printf("Vertical edge at %i/%i (%i)\n",xv,yv,wi-vo); */
-                if ((xv == 0 && yv == 0     && ((new->edge_h[0]           & EDGE_WALL) == 0x00)) ||
-                    (xv == w && yv == 0     && ((new->edge_h[w-1]         & EDGE_WALL) == 0x00)) ||
-                    (xv == 0 && yv == (h-1) && ((new->edge_h[w*h]         & EDGE_WALL) == 0x00)) ||
-                    (xv == w && yv == (h-1) && ((new->edge_h[w*(h+1)-1]   & EDGE_WALL) == 0x00)) ||
-                    ((xv == 0 || xv == w) && (bordernum >= borderreduce))) {
+                if ((xv == 0 && yv == 0     && ((new->edge_h[0]           & FLAG_WALL) == 0x00)) ||
+                    (xv == w && yv == 0     && ((new->edge_h[w-1]         & FLAG_WALL) == 0x00)) ||
+                    (xv == 0 && yv == (h-1) && ((new->edge_h[w*h]         & FLAG_WALL) == 0x00)) ||
+                    (xv == w && yv == (h-1) && ((new->edge_h[w*(h+1)-1]   & FLAG_WALL) == 0x00))) {
+                    continue;
+                }
+                if ((xv == 0 || xv == w) && (bordernum >= borderreduce)) {
                     continue;
                 }
             }
 
+            /* Temporarily remove wall, check if game is still solveable */
             tmp = dup_state(new);
-            /* Remove interior wall */
-            if (wi<vo) tmp->edge_h[wi]    = EDGE_NONE;
-            else       tmp->edge_v[wi-vo] = EDGE_NONE;
+            if (wi<vo) tmp->edge_h[wi]    = FLAG_NONE;
+            else       tmp->edge_v[wi-vo] = FLAG_NONE;
             
+            /* It is, remove this wall permanently */
             if (walls_solve(tmp, params->difficulty, false) == SOLVED) {
-                /* printf("Remove edge at %i\n", wi); */
-                if (wi<vo) new->edge_h[wi]    = EDGE_NONE;
-                else       new->edge_v[wi-vo] = EDGE_NONE;
+                if (wi<vo) new->edge_h[wi]    = FLAG_NONE;
+                else       new->edge_v[wi-vo] = FLAG_NONE;
                 if (wi<vo && (wi/w == 0 || wi/w == h)) bordernum++;
                 else if ((wi-vo)%(w+1) == 0 || (wi-vo)%(w+1) == w) bordernum++;
             }
-            /* else printf("Keep edge at %i\n", wi); */
             free_state(tmp);
         }
-        printf("Removed %i border walls\n", bordernum);
         print_grid(new);
         if (params->difficulty == DIFF_EASY) break;
         tmp = dup_state(new);
@@ -849,6 +976,10 @@ static char *new_game_desc(const game_params *params, random_state *rs,
         }
         break;
     }
+    printf("We have a puzzle! Solution:\n");
+    tmp = dup_state(new);
+    result = walls_solve(tmp, params->difficulty, true);
+    free_state(tmp);
 
     /* Encode walls */
     desc = snewn((w+1)*h + w*(h+1) + (w*h) + 1, char);
@@ -891,21 +1022,21 @@ static game_state *new_game(midend *me, const game_params *params,
     while (*desc) {
         if(isdigit((unsigned char)*desc)) {
             for (c = atoi(desc); c > 0; c--) {
-                if (fh) state->edge_h[i] = EDGE_WALL | EDGE_FIXED;
-                else    state->edge_v[i] = EDGE_WALL | EDGE_FIXED;
+                if (fh) state->edge_h[i] = FLAG_WALL | FLAG_FIXED;
+                else    state->edge_v[i] = FLAG_WALL | FLAG_FIXED;
                 i++;
             }
             while (*desc && isdigit((unsigned char)*desc)) desc++;
         }
         else if(*desc >= 'a' && *desc <= 'z') {
             for (c = *desc - 'a' + 1; c > 0; c--) {
-                if (fh) state->edge_h[i] = EDGE_NONE;
-                else    state->edge_v[i] = EDGE_NONE;
+                if (fh) state->edge_h[i] = FLAG_NONE;
+                else    state->edge_v[i] = FLAG_NONE;
                 i++;
             }
             if (*desc < 'z' && i < (fh ? w*(h+1) : (w+1)*h)) {
-                if (fh) state->edge_h[i] = EDGE_WALL | EDGE_FIXED;
-                else    state->edge_v[i] = EDGE_WALL | EDGE_FIXED;
+                if (fh) state->edge_h[i] = FLAG_WALL | FLAG_FIXED;
+                else    state->edge_v[i] = FLAG_WALL | FLAG_FIXED;
                 i++;
             }
             desc++;
@@ -943,19 +1074,19 @@ static char *solve_game(const game_state *state, const game_state *currstate,
     walls_solve(solve_state, DIFF_HARD, true);
     p += sprintf(p, "S");
     for (i = 0; i < w*(h+1); i++) {
-        if (solve_state->edge_h[i] == EDGE_WALL)
+        if (solve_state->edge_h[i] == FLAG_WALL)
             p += sprintf(p, ";W%d", i);
-        if (solve_state->edge_h[i] == EDGE_NONE)
+        if (solve_state->edge_h[i] == FLAG_NONE)
             p += sprintf(p, ";C%d", i);
-        if (solve_state->edge_h[i] == EDGE_PATH)
+        if (solve_state->edge_h[i] == FLAG_PATH)
             p += sprintf(p, ";P%d", i);
     }
     for (i = 0; i < (w+1)*h; i++) {
-        if (solve_state->edge_v[i] == EDGE_WALL)
+        if (solve_state->edge_v[i] == FLAG_WALL)
             p += sprintf(p, ";W%d", i+voff);
-        if (solve_state->edge_v[i] == EDGE_NONE)
+        if (solve_state->edge_v[i] == FLAG_NONE)
             p += sprintf(p, ";C%d", i+voff);
-        if (solve_state->edge_v[i] == EDGE_PATH)
+        if (solve_state->edge_v[i] == FLAG_PATH)
             p += sprintf(p, ";P%d", i+voff);
     }
     *p++ = '\0';
@@ -980,8 +1111,8 @@ static char *game_text_format(const game_state *state) {
 
     for (y=0;y<=h;y++) {
         for (x=0;x<w;x++) {
-            iswall = state->edge_h[y*w + x] & EDGE_WALL;
-            isline = state->edge_h[y*w + x] & EDGE_PATH;
+            iswall = state->edge_h[y*w + x] & FLAG_WALL;
+            isline = state->edge_h[y*w + x] & FLAG_PATH;
             *p++ = '+';
             *p++ = iswall ? '-' : ' ';
             *p++ = isline ? '*' : iswall ? '-' : ' ';
@@ -990,18 +1121,18 @@ static char *game_text_format(const game_state *state) {
         *p++ = '+'; *p++ = '\n';
         if (y<h) {
             for (x=0;x<w;x++) {
-                iswall  = state->edge_v[y*(w+1) + x]     & EDGE_WALL;
-                isleft  = state->edge_v[y*(w+1) + x]     & EDGE_PATH;
-                isright = state->edge_v[y*(w+1) + x + 1] & EDGE_PATH;
-                isup    = state->edge_h[y*w + x]         & EDGE_PATH;
-                isdown  = state->edge_h[y*w + x + w]     & EDGE_PATH;
+                iswall  = state->edge_v[y*(w+1) + x]     & FLAG_WALL;
+                isleft  = state->edge_v[y*(w+1) + x]     & FLAG_PATH;
+                isright = state->edge_v[y*(w+1) + x + 1] & FLAG_PATH;
+                isup    = state->edge_h[y*w + x]         & FLAG_PATH;
+                isdown  = state->edge_h[y*w + x + w]     & FLAG_PATH;
                 *p++ = isleft ? '*' : iswall ? '|' : ' ';
                 *p++ = isleft ? '*' : ' ';
                 *p++ = (isleft || isright || isup || isdown) ? '*' : ' ';
                 *p++ = isright ? '*' : ' ';
             }
-            iswall  = state->edge_v[y*(w+1) + w] & EDGE_WALL;
-            isright = state->edge_v[y*(w+1) + w] & EDGE_PATH;
+            iswall  = state->edge_v[y*(w+1) + w] & FLAG_WALL;
+            isright = state->edge_v[y*(w+1) + w] & FLAG_PATH;
             *p++ = isright ? '*' : iswall ? '|' : ' '; 
             *p++ = '\n';
         }
@@ -1074,7 +1205,7 @@ struct game_drawstate {
     int tilesize;
     int w, h;
     bool tainted;
-    unsigned short *cell;
+    unsigned long *cell;
 };
 
 static char *mark_in_direction(const game_state *state, int x, int y, int dir,
@@ -1085,23 +1216,23 @@ static char *mark_in_direction(const game_state *state, int x, int y, int dir,
 
     if (dir == U || dir == D) {
         edge = dir == U ? x+y*w : x+(y+1)*w;
-        if (((state->edge_h[edge] & EDGE_FIXED) > 0x00) ||
-            (!primary && (state->edge_h[edge] & EDGE_PATH) > 0x00) || 
-             (primary && (state->edge_h[edge] & EDGE_WALL) > 0x00))
+        if (((state->edge_h[edge] & FLAG_FIXED) > 0x00) ||
+            (!primary && (state->edge_h[edge] & FLAG_PATH) > 0x00) || 
+             (primary && (state->edge_h[edge] & FLAG_WALL) > 0x00))
             return UI_UPDATE;
-        if ((primary && (state->edge_h[edge] & EDGE_PATH) > 0x00) || 
-            (!primary && (state->edge_h[edge] & EDGE_WALL) > 0x00))
+        if ((primary && (state->edge_h[edge] & FLAG_PATH) > 0x00) || 
+            (!primary && (state->edge_h[edge] & FLAG_WALL) > 0x00))
              sprintf(buf,"C%d",edge);
         else sprintf(buf,"%c%d", primary ? 'P' : 'W', edge);
     }
     else {
         edge = dir == L ? x+y*(w+1) : (x+1)+y*(w+1);
-        if (((state->edge_v[edge] & EDGE_FIXED) > 0x00) ||
-            (!primary && (state->edge_v[edge] & EDGE_PATH) > 0x00) || 
-            (primary && (state->edge_v[edge] & EDGE_WALL) > 0x00))
+        if (((state->edge_v[edge] & FLAG_FIXED) > 0x00) ||
+            (!primary && (state->edge_v[edge] & FLAG_PATH) > 0x00) || 
+            (primary && (state->edge_v[edge] & FLAG_WALL) > 0x00))
             return UI_UPDATE;
-        if ((primary && (state->edge_v[edge] & EDGE_PATH) > 0x00) || 
-            (!primary && (state->edge_v[edge] & EDGE_WALL) > 0x00))
+        if ((primary && (state->edge_v[edge] & FLAG_PATH) > 0x00) || 
+            (!primary && (state->edge_v[edge] & FLAG_WALL) > 0x00))
             sprintf(buf,"C%d",edge+w*(h+1));
         else sprintf(buf,"%c%d", primary ? 'P' : 'W', edge+w*(h+1));
     }
@@ -1195,9 +1326,9 @@ static game_state *execute_move(const game_state *state, const char *move) {
                 free_game(ret);
                 return NULL;
             }
-            newedge = (c=='W') ? EDGE_WALL :
-                      (c=='P') ? EDGE_PATH :
-                                 EDGE_NONE;
+            newedge = (c=='W') ? FLAG_WALL :
+                      (c=='P') ? FLAG_PATH :
+                                 FLAG_NONE;
             if (edge < w*(h+1)) ret->edge_h[edge] = newedge;
             else ret->edge_v[edge-w*(h+1)] = newedge;
             move += n;
@@ -1302,9 +1433,9 @@ static game_drawstate *game_new_drawstate(drawing *dr, const game_state *state) 
     ds->w = w;
     ds->h = h;
     ds->tainted = true;
-    ds->cell   = snewn((8*w+5)*(8*h+5), unsigned short);
+    ds->cell   = snewn((8*w+5)*(8*h+5), unsigned long);
 
-    for (i=0;i<(8*w+5)*(8*h+5); i++) ds->cell[i] = 0x0000;
+    for (i=0;i<(8*w+5)*(8*h+5); i++) ds->cell[i] = 0x00000000;
 
     return ds;
 }
@@ -1326,14 +1457,14 @@ static void draw_cell(drawing *dr, game_drawstate *ds, int pos) {
 
     clip(dr, ox, oy, ds->tilesize, ds->tilesize);
 
-    if ((ds->cell[pos] & (EDGE_WALL | EDGE_FIXED)) == (EDGE_WALL|EDGE_FIXED)) {
+    if ((ds->cell[pos] & (FLAG_WALL | FLAG_FIXED)) == (FLAG_WALL|FLAG_FIXED)) {
         draw_rect(dr, ox, oy, ds->tilesize, ds->tilesize, COL_FIXED);
     }
-    else if ((ds->cell[pos] & EDGE_PATH) == EDGE_PATH) {
+    else if ((ds->cell[pos] & FLAG_PATH) == FLAG_PATH) {
         draw_rect(dr, ox, oy, ds->tilesize, ds->tilesize,
-            (ds->cell[pos] & EDGE_FLASH)>0 ? COL_FLASH : 
-            (ds->cell[pos] & EDGE_DRAG) >0 ? COL_DRAGOFF :
-            (ds->cell[pos] & EDGE_ERROR)>0 ? COL_ERROR :
+            (ds->cell[pos] & FLAG_FLASH)>0 ? COL_FLASH : 
+            (ds->cell[pos] & FLAG_DRAG) >0 ? COL_DRAGOFF :
+            (ds->cell[pos] & FLAG_ERROR)>0 ? COL_ERROR :
                                              COL_PATH);
     }
     else {
@@ -1343,14 +1474,14 @@ static void draw_cell(drawing *dr, game_drawstate *ds, int pos) {
             else if (i==1) { dx = ox;     dy = oy+ts2; }
             else if (i==2) { dx = ox+ts2; dy = oy; }
             else           { dx = ox+ts2; dy = oy+ts2; }
-            col = (ds->cell[pos] & EDGE_DRAG) >0 ? COL_DRAGON :
+            col = (ds->cell[pos] & FLAG_DRAG) >0 ? COL_DRAGON :
                   (bg==0x00) ? COL_BACKGROUND :
                   (bg==0x01) ? COL_FLOOR_A :
                   (bg==0x02) ? COL_FLOOR_B :
                                COL_CURSOR;
             draw_rect(dr, dx, dy, ts2, ts2, col);
         }
-        if ((ds->cell[pos] & EDGE_WALL) == EDGE_WALL) {
+        if ((ds->cell[pos] & FLAG_WALL) == FLAG_WALL) {
             int c[8];
             c[0] = ox; c[1] = oy;
             c[2] = ox; c[3] = oy+ts2;
@@ -1371,6 +1502,8 @@ static void draw_cell(drawing *dr, game_drawstate *ds, int pos) {
             c[4] = ox+ds->tilesize; c[5] = oy+ts2;
             draw_polygon(dr, c, 3, COL_WALL_B, COL_WALL_B);
         }
+        else if ((ds->cell[pos] & FLAG_ERROR) >0)
+            draw_rect(dr, ox, oy, ds->tilesize, ds->tilesize, COL_ERROR);
     }
     draw_update(dr, ox, oy, ds->tilesize, ds->tilesize);
     unclip(dr);
@@ -1382,21 +1515,25 @@ static void game_redraw(drawing *dr, game_drawstate *ds,
                         const game_state *oldstate, const game_state *state,
                         int dir, const game_ui *ui,
                         float animtime, float flashtime) {
-    int i,j,w,h,x,y,cx,cy;
-    unsigned short *newcell;
+    int i,j,w,h,x,y,cx,cy,csx,csy;
+    unsigned long *newcell;
+    unsigned char cellerror;
     bool flash = (bool)((int)(flashtime * 5 / FLASH_TIME) % 2);
-    unsigned short flashflag = (flashtime > 0.0 && flash) ? EDGE_FLASH : EDGE_NONE;
+    unsigned short flashflag = (flashtime > 0.0 && flash) ? FLAG_FLASH : FLAG_NONE;
     w = state->w; h = state->h;
-    newcell = snewn((8*w+5)*(8*h+5), unsigned short);
-    for (i=0;i<((8*w)+5)*((8*h)+5); i++) newcell[i] = 0x0000;
+    newcell = snewn((8*w+5)*(8*h+5), unsigned long);
+    for (i=0;i<((8*w)+5)*((8*h)+5); i++) newcell[i] = 0x00000000;
 
     if (ui->ndragcoords > 0)
         for (i=0;i<ui->ndragcoords;i++)
-            newcell[ui->dragcoords[i]] |= EDGE_DRAG;
+            newcell[ui->dragcoords[i]] |= FLAG_DRAG;
     
     for (i=0;i<((8*w)+5)*((8*h)+5); i++) {
         x = i%(8*w+5)-2; y = i/(8*w+5)-2;
         cx = x/8; cy = y/8;
+        csx = (x<0) ? 0 : cx+1; csy = (y<0) ? 0 : cy+1;
+
+        cellerror = state->cellstate[csx+csy*(w+2)];
 
         /* Corner border cells. Unused. */
         if ((x<0 && y<0) || (x<0 && y>8*h) || (x>8*w && y<0) || (x>8*w && y>8*h)) {}
@@ -1404,31 +1541,35 @@ static void game_redraw(drawing *dr, game_drawstate *ds,
         /* Left / Right border cells */
         else if (x<0 || x>8*w) {
             if (y%8==4 && x==-1)
-                newcell[i] |= flashflag|(state->edge_v[cy*(w+1)]   & (EDGE_PATH|EDGE_ERROR));
+                newcell[i] |= flashflag|(state->edge_v[cy*(w+1)]   & (FLAG_PATH|cellerror));
             if (y%8==4 && x==8*w+1)
-                newcell[i] |= flashflag|(state->edge_v[w+cy*(w+1)] & (EDGE_PATH|EDGE_ERROR));
+                newcell[i] |= flashflag|(state->edge_v[w+cy*(w+1)] & (FLAG_PATH|cellerror));
         }
 
         /* Top / Bottom border cells */
         else if (y<0 || y>8*h) {
             if (x%8==4 && y==-1)
-                newcell[i] |= flashflag|(state->edge_h[cx]         & (EDGE_PATH|EDGE_ERROR));
+                newcell[i] |= flashflag|(state->edge_h[cx]         & (FLAG_PATH|cellerror));
             if (x%8==4 && y==8*h+1)
-                newcell[i] |= flashflag|(state->edge_h[cx+h*w]     & (EDGE_PATH|EDGE_ERROR));
+                newcell[i] |= flashflag|(state->edge_h[cx+h*w]     & (FLAG_PATH|cellerror));
         }
 
         /* 4-Corner cells */
         else if ((x%8 == 0) && (y%8 == 0)) {
             if (ui->show_grid) {
-                if (cx > 0 && cy > 0) newcell[i] |= CURSOR(cx-1,cy-1) ? 0x0300 : ((cx-1)^(cy-1))&1 ? 0x0100:0x0200;
-                if (cx > 0 && cy < h) newcell[i] |= CURSOR(cx-1,cy)   ? 0x0c00 : ((cx-1)^ cy)   &1 ? 0x0400:0x0800;
-                if (cx < w && cy > 0) newcell[i] |= CURSOR(cx,cy-1)   ? 0x3000 : ( cx   ^(cy-1))&1 ? 0x1000:0x2000;
-                if (cx < w && cy < h) newcell[i] |= CURSOR(cx,cy)     ? 0xc000 : ( cx   ^ cy)   &1 ? 0x4000:0x8000;
+                if (cx>0 && cy>0)
+                    newcell[i] |= CURSOR(cx-1,cy-1) ? 0x0300 : ((cx-1)^(cy-1))&1 ? 0x0100:0x0200;
+                if (cx>0 && cy<h)
+                    newcell[i] |= CURSOR(cx-1,cy)   ? 0x0c00 : ((cx-1)^ cy)   &1 ? 0x0400:0x0800;
+                if (cx<w && cy>0)
+                    newcell[i] |= CURSOR(cx,cy-1)   ? 0x3000 : ( cx   ^(cy-1))&1 ? 0x1000:0x2000;
+                if (cx<w && cy<h)
+                    newcell[i] |= CURSOR(cx,cy)     ? 0xc000 : ( cx   ^ cy)   &1 ? 0x4000:0x8000;
             }
-            if (cx > 0) newcell[i] |= state->edge_h[(cx-1)+cy*w]     & (EDGE_WALL | EDGE_FIXED);
-            if (cx < w) newcell[i] |= state->edge_h[cx+cy*w]         & (EDGE_WALL | EDGE_FIXED);
-            if (cy > 0) newcell[i] |= state->edge_v[cx+(cy-1)*(w+1)] & (EDGE_WALL | EDGE_FIXED);
-            if (cy < h) newcell[i] |= state->edge_v[cx+cy*(w+1)]     & (EDGE_WALL | EDGE_FIXED);
+            if (cx > 0) newcell[i] |= state->edge_h[(cx-1)+cy*w]     & (FLAG_WALL | FLAG_FIXED);
+            if (cx < w) newcell[i] |= state->edge_h[cx+cy*w]         & (FLAG_WALL | FLAG_FIXED);
+            if (cy > 0) newcell[i] |= state->edge_v[cx+(cy-1)*(w+1)] & (FLAG_WALL | FLAG_FIXED);
+            if (cy < h) newcell[i] |= state->edge_v[cx+cy*(w+1)]     & (FLAG_WALL | FLAG_FIXED);
         }
 
         /* Horizontal edge cells */
@@ -1437,9 +1578,11 @@ static void game_redraw(drawing *dr, game_drawstate *ds,
                 if (cy > 0) newcell[i] |= CURSOR(cx,cy-1) ? 0x3300 : (cx^(cy-1))&1 ? 0x1100:0x2200;
                 if (cy < h) newcell[i] |= CURSOR(cx,cy)   ? 0xcc00 : (cx^ cy)   &1 ? 0x4400:0x8800;
             }
-            newcell[i] |= state->edge_h[cx+cy*w] & (EDGE_WALL|EDGE_FIXED);
-            if (x%8==4)
-                newcell[i] |= flashflag|(state->edge_h[cx+cy*w] & (EDGE_PATH|EDGE_ERROR));
+            newcell[i] |= state->edge_h[cx+cy*w] & (FLAG_WALL|FLAG_FIXED);
+            if (x%8==4) {
+                newcell[i] |= flashflag|(state->edge_h[cx+cy*w] & (FLAG_PATH|FLAG_ERROR));
+                if ((newcell[i] & FLAG_PATH)>0) newcell[i] |= cellerror;
+            }
         }
 
         /* Vertical edge cells */
@@ -1448,9 +1591,11 @@ static void game_redraw(drawing *dr, game_drawstate *ds,
                 if (cx > 0) newcell[i] |= CURSOR(cx-1,cy) ? 0x0f00 : ((cx-1)^cy)&1 ? 0x0500:0x0a00;
                 if (cx < w) newcell[i] |= CURSOR(cx,cy)   ? 0xf000 : ( cx   ^cy)&1 ? 0x5000:0xa000;
             }
-            newcell[i] |= state->edge_v[cx+cy*(w+1)] & (EDGE_WALL|EDGE_FIXED);
-            if (y%8==4)
-                newcell[i] |= flashflag|(state->edge_v[cx+cy*(w+1)] & (EDGE_PATH|EDGE_ERROR));
+            newcell[i] |= state->edge_v[cx+cy*(w+1)] & (FLAG_WALL|FLAG_FIXED);
+            if (y%8==4) {
+                newcell[i] |= flashflag|(state->edge_v[cx+cy*(w+1)] & (FLAG_PATH|FLAG_ERROR));
+                if ((newcell[i] & FLAG_PATH)>0) newcell[i] |= cellerror;
+            }
         }
         
         /* Path cells */
@@ -1458,13 +1603,17 @@ static void game_redraw(drawing *dr, game_drawstate *ds,
             if (ui->show_grid) 
                 for (j=0;j<4;j++) newcell[i] |= (CURSOR(cx,cy) ? 0x03 : (cx^cy)&1 ? 0x01:0x02) << (8+2*j);
             if (x%8==4 && y%8<=4)
-                newcell[i] |= flashflag|(state->edge_h[cx+cy*w]         & (EDGE_PATH|EDGE_ERROR));
+                newcell[i] |= flashflag|(state->edge_h[cx+cy*w]         & (FLAG_PATH|cellerror));
             if (x%8==4 && y%8>=4)
-                newcell[i] |= flashflag|(state->edge_h[cx+(cy+1)*w]     & (EDGE_PATH|EDGE_ERROR));
+                newcell[i] |= flashflag|(state->edge_h[cx+(cy+1)*w]     & (FLAG_PATH|cellerror));
             if (y%8==4 && x%8<=4)
-                newcell[i] |= flashflag|(state->edge_v[cx+cy*(w+1)]     & (EDGE_PATH|EDGE_ERROR));
+                newcell[i] |= flashflag|(state->edge_v[cx+cy*(w+1)]     & (FLAG_PATH|cellerror));
             if (y%8==4 && x%8>=4)
-                newcell[i] |= flashflag|(state->edge_v[(cx+1)+cy*(w+1)] & (EDGE_PATH|EDGE_ERROR));
+                newcell[i] |= flashflag|(state->edge_v[(cx+1)+cy*(w+1)] & (FLAG_PATH|cellerror));
+            if (x%8==4 && y%8==4)
+                if ((state->cellstate[csx+csy*(w+2)] & FLAG_ERROR)>0) newcell[i] |= FLAG_ERROR;
+            if ((x%8==4 || y%8==4) && (newcell[i] & FLAG_PATH)>0) newcell[i] |= cellerror;
+
         }
     }
     for (i=0;i<((8*w)+5)*((8*h)+5); i++) {
@@ -1577,14 +1726,14 @@ int main(int argc, char **argv) {
     p = default_params();
     p->w = 6;
     p->h = 5;
-    p->difficulty = DIFF_NORMAL;
+    p->difficulty = DIFF_TRICKY;
 
-    for (i=0;i<1000;i++) {
+    for (i=0;i<10000;i++) {
         desc = new_game_desc(p, rs, NULL, 0);
         printf("%s\n", desc);
         state = new_game(NULL, p, desc);
         // print_grid(state);
-        walls_solve(state, DIFF_NORMAL, false);
+        walls_solve(state, p->difficulty, false);
         print_grid(state);
         free_state(state);
         sfree(desc);
