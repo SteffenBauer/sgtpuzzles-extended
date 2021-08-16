@@ -89,7 +89,7 @@ struct game_state {
 #define DEFAULT_PRESET 1
 static const struct game_params walls_presets[] = {
     {4, 3,  DIFF_EASY},
-    {4, 3,  DIFF_NORMAL},
+    {4, 3,  DIFF_TRICKY},
     {7, 6,  DIFF_NORMAL},
     {7, 6,  DIFF_TRICKY},
     {9, 8,  DIFF_NORMAL},
@@ -204,15 +204,6 @@ static const char *validate_params(const game_params *params, bool full) {
     if (params->difficulty < 0 || params->difficulty >= DIFFCOUNT)
         return "Unknown difficulty level";
     return NULL;
-}
-
-static char *game_text_format(const game_state *state);
-
-static void print_grid(const game_state *state) {
-    char *grid;
-    grid = game_text_format(state);
-    printf("%s", grid);
-    sfree(grid);
 }
 
 typedef struct gridstate {
@@ -449,6 +440,8 @@ static int check_solution(game_state *state, bool full) {
 
 struct solver_scratch {
     int *loopdsf;
+    bool *done_islands;
+    int island_counter;
     int difficulty;
     bool verbose;
 };
@@ -480,7 +473,8 @@ static bool solve_single_cells(game_state *state, struct solver_scratch *scratch
             for (i = 0; i < 4; i++) {
                 if (available_mask & (0x01 << i)){ 
                     if (scratch->verbose)
-                        printf("Set path in cell %i/%i at %i\n",x,y,i);
+                        printf("Set path in cell %i/%i at %c\n",x,y,
+                            i == 0 ? 'U' : i == 1 ? 'D' : i == 2 ? 'L' : 'R');
                     *edges[i] |= FLAG_PATH;
                     if (scratch->difficulty >= DIFF_NORMAL) {
                         j = x+y*w;
@@ -497,7 +491,8 @@ static bool solve_single_cells(game_state *state, struct solver_scratch *scratch
             for (i = 0; i < 4; ++i) {
                 if (available_mask & (0x01 << i)) {
                     if (scratch->verbose)
-                        printf("Set wall in cell %i/%i at %i\n",x,y,i);
+                        printf("Set wall in cell %i/%i at %c\n",x,y,
+                            i == 0 ? 'U' : i == 1 ? 'D' : i == 2 ? 'L' : 'R');
                     *edges[i] |= FLAG_WALL;
                 }
             }
@@ -547,9 +542,6 @@ static bool solve_loops(game_state *state, struct solver_scratch *scratch) {
                 }
             }
             if (free_count == 3 && wall_count == 1) {
-                if (scratch->verbose)
-                    printf("Possible loop ladder at %i/%i: %i %i %i %i\n",
-                        x, y, dsf_idx[0], dsf_idx[1], dsf_idx[2], dsf_idx[3]);
                 single_idx = -1;
                 if (dsf_idx[0] == -2) {
                     if (dsf_idx[1] != dsf_idx[2] && dsf_idx[2] == dsf_idx[3]) single_idx = 1;
@@ -573,7 +565,9 @@ static bool solve_loops(game_state *state, struct solver_scratch *scratch) {
                 }
                 if (single_idx != -1) {
                     if (scratch->verbose)
-                        printf("Loop ladder at cell %i/%i, placing edge at %i\n", x, y, single_idx);
+                        printf("Loop ladder at cell %i/%i, placing edge at %c\n", x, y, 
+                            single_idx == 0 ? 'U' : single_idx == 1 ? 'D' :
+                            single_idx == 2 ? 'L' : 'R');
                     *edges[single_idx] |= FLAG_PATH;
                     for (i=0;i<4;i++) {
                         if (dsf_idx[i] != -2) {
@@ -660,20 +654,287 @@ static bool solve_partitions(game_state *state, struct solver_scratch *scratch) 
     return false;
 }
 
+static inline bool parity(int x, int y) {
+    return (x^y)&1;
+}
+
+static bool parity_check_block(game_state *state, struct solver_scratch *scratch,
+    int bx, int by, int bw, int bh) {
+    int i,j,n,x,y,f;
+    int h = state->h;
+    int w = state->w;
+    unsigned char *edges[4];
+    int *dsf;
+    bool found;
+    bool result = false;
+    int processed_count = 0;
+    int *processed_cells = snewn(w*h, int);
+    int *group_cells = snewn(w*h, int);
+
+    scratch->done_islands[scratch->island_counter] = true;
+
+    /* Build a dsf over the relevant area */
+    dsf = snewn(w*h,int);
+    dsf_init(dsf, w*h);
+    for (y=by;y<by+bh;y++)
+    for (x=bx;x<bx+bw;x++) {
+        i = x+y*w;
+        edges[0] = state->edge_h + y*w + x;
+        edges[1] = edges[0] + w;
+        edges[2] = state->edge_v + y*(w+1) + x;
+        edges[3] = edges[2] + 1;
+        if ((*edges[0] & FLAG_WALL) == 0x00 && y>by)        dsf_merge(dsf, i, i-w);
+        if ((*edges[1] & FLAG_WALL) == 0x00 && y<(by+bh)-1) dsf_merge(dsf, i, i+w);
+        if ((*edges[2] & FLAG_WALL) == 0x00 && x>bx)        dsf_merge(dsf, i, i-1);
+        if ((*edges[3] & FLAG_WALL) == 0x00 && x<(bx+bw)-1) dsf_merge(dsf, i, i+1);
+        for (j=0;j<4;j++)
+            if (*edges[j] == FLAG_NONE)
+                scratch->done_islands[scratch->island_counter] = false;
+    }
+
+    if (scratch->done_islands[scratch->island_counter]) {
+        goto finish;
+    }
+
+    /* Process each separate dsf group */
+    for (i=0;i<w*h;i++) processed_cells[i] = -1;
+    while(true) {
+        int count_black, count_white;
+        int avail_black, avail_white;
+        int paths_black, paths_white;
+        int walls_black, walls_white;
+        
+        int min_cells;
+        int extra_white, extra_black;
+        int min_white, min_black;
+        int max_white, max_black;
+        bool only_min_path_avail_white, only_min_path_avail_black;
+        bool black_used_max_paths, white_used_max_paths;
+        bool fill_paths_white, fill_paths_black;
+        bool fill_walls_white, fill_walls_black;
+        
+        int group_count = 0;
+
+        count_black = count_white = 0;
+        avail_black = avail_white = 0;
+        paths_black = paths_white = 0;
+        walls_black = walls_white = 0;
+
+        for (i=0;i<w*h;i++) {
+            found = false;
+            for (j=0;j<w*h;j++) {
+                if (processed_cells[j] == i) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) break;
+        }
+        if (i==w*h) break;
+
+        f = dsf_canonify(dsf, i);
+        for (n = 0; n < w*h; n++) {
+            if (dsf_canonify(dsf, n) == f) {
+                processed_cells[processed_count++] = n;
+                group_cells[group_count++] = n;
+                x = n%state->w; y=n/state->w;
+                parity(x,y) ? count_white++ : count_black++;
+            }
+        }
+        if (group_count == 1) continue;
+
+        for (n=0;n<group_count;n++) {
+            x = group_cells[n]%w; y=group_cells[n]/w;
+            edges[0] = state->edge_h + y*w + x;
+            edges[1] = edges[0] + w;
+            edges[2] = state->edge_v + y*(w+1) + x;
+            edges[3] = edges[2] + 1;
+            if (y == by || dsf_canonify(dsf, x+(y-1)*w) != f) {
+                if ((*edges[0] & FLAG_WALL) == 0)         parity(x,y) ? avail_white++ : avail_black++;
+                if ((*edges[0] & FLAG_PATH) == FLAG_PATH) parity(x,y) ? paths_white++ : paths_black++;
+                if ((*edges[0] & FLAG_WALL) == FLAG_WALL) parity(x,y) ? walls_white++ : walls_black++;
+            }
+            if (y == by+bh-1 || dsf_canonify(dsf, x+(y+1)*w) != f) {
+                if ((*edges[1] & FLAG_WALL) == 0)         parity(x,y) ? avail_white++ : avail_black++;
+                if ((*edges[1] & FLAG_PATH) == FLAG_PATH) parity(x,y) ? paths_white++ : paths_black++;
+                if ((*edges[1] & FLAG_WALL) == FLAG_WALL) parity(x,y) ? walls_white++ : walls_black++;
+            }
+            if (x == bx || dsf_canonify(dsf, (x-1)+y*w) != f) {
+                if ((*edges[2] & FLAG_WALL) == 0)         parity(x,y) ? avail_white++ : avail_black++;
+                if ((*edges[2] & FLAG_PATH) == FLAG_PATH) parity(x,y) ? paths_white++ : paths_black++;
+                if ((*edges[2] & FLAG_WALL) == FLAG_WALL) parity(x,y) ? walls_white++ : walls_black++;
+            }
+            if (x == bx+bw-1 || dsf_canonify(dsf, (x+1)+y*w) != f) {
+                if ((*edges[3] & FLAG_WALL) == 0)         parity(x,y) ? avail_white++ : avail_black++;
+                if ((*edges[3] & FLAG_PATH) == FLAG_PATH) parity(x,y) ? paths_white++ : paths_black++;
+                if ((*edges[3] & FLAG_WALL) == FLAG_WALL) parity(x,y) ? walls_white++ : walls_black++;
+            }
+        }
+
+        min_cells = min(count_white, count_black);
+
+        extra_white = count_white - min_cells;
+        extra_black = count_black - min_cells;
+
+        min_white = 1 + extra_white - extra_black;
+        min_black = 1 + extra_black - extra_white;
+
+        max_white = min(avail_white, avail_black+2*(extra_white-extra_black));
+        max_black = min(avail_black, avail_white+2*(extra_black-extra_white));
+
+        if (count_black + count_white == w*h) {
+            min_white = max_white = (count_black == count_white) ? 1 :
+                                    (count_black <  count_white) ? 2 : 0;
+            min_black = max_black = (count_black == count_white) ? 1 :
+                                    (count_black <  count_white) ? 0 : 2;
+        }
+
+        only_min_path_avail_white = (min_white == avail_white) && (paths_white < min_white);
+        only_min_path_avail_black = (min_black == avail_black) && (paths_black < min_black);
+
+        black_used_max_paths = (max_black == paths_black) && (avail_white == max_white) && (paths_white < max_white);
+        white_used_max_paths = (max_white == paths_white) && (avail_black == max_black) && (paths_black < max_black);
+
+        fill_paths_white = (only_min_path_avail_white || black_used_max_paths);
+        fill_paths_black = (only_min_path_avail_black || white_used_max_paths);
+
+        fill_walls_white = (paths_white == max_white) && (avail_white > max_white);
+        fill_walls_black = (paths_black == max_black) && (avail_black > max_black);
+
+        if (fill_paths_white || fill_paths_black || fill_walls_white || fill_walls_black) {
+            if (scratch->verbose) {
+                printf("Block at %i/%i (%i/%i) ",bx,by,bw,bh);
+                printf("Size %i, black %i, white %i: ",
+                    dsf_size(dsf, i), count_black, count_white);
+                printf("Avail %i/%i, Paths %i/%i, Walls %i/%i ", avail_white, avail_black, paths_white, paths_black, walls_white, walls_black);
+                printf("Path fill %s/%s ", fill_paths_white ? "T" : "F",fill_paths_black ? "T" : "F");
+                printf("Wall fill %s/%s ", fill_walls_white ? "T" : "F",fill_walls_black ? "T" : "F");
+                printf("\n");
+            }
+            for (n=0;n<group_count;n++) {
+                x = group_cells[n]%w; y=group_cells[n]/w;
+                edges[0] = state->edge_h + y*w + x;
+                edges[1] = edges[0] + w;
+                edges[2] = state->edge_v + y*(w+1) + x;
+                edges[3] = edges[2] + 1;
+                if ((fill_paths_white && parity(x,y)) ||
+                    (fill_paths_black && !parity(x,y))) {
+                    if ((*edges[0] == FLAG_NONE) && 
+                        (y == by || dsf_canonify(dsf, x+(y-1)*w) != f)) {
+                        *edges[0] = FLAG_PATH;
+                        if (scratch->verbose)
+                            printf("Parity (%i/%i) block at %i/%i: Place path at cell %i direction U\n",
+                                   bw,bh,bx,by,group_cells[n]);
+                    }
+                    if ((*edges[1] == FLAG_NONE) && 
+                        (y == by+bh-1 || dsf_canonify(dsf, x+(y+1)*w) != f)) {
+                        *edges[1] = FLAG_PATH;
+                        if (scratch->verbose)
+                            printf("Parity (%i/%i) block at %i/%i: Place path at cell %i direction D\n",
+                                   bw,bh,bx,by,group_cells[n]);
+                    }
+                    if ((*edges[2] == FLAG_NONE) && 
+                        (x == bx || dsf_canonify(dsf, (x-1)+y*w) != f)) {
+                        *edges[2] = FLAG_PATH;
+                        if (scratch->verbose)
+                            printf("Parity (%i/%i) block at %i/%i: Place path at cell %i direction L\n",
+                                   bw,bh,bx,by,group_cells[n]);
+                    }
+                    if ((*edges[3] == FLAG_NONE) && 
+                        (x == bx+bw-1 || dsf_canonify(dsf, (x+1)+y*w) != f)) {
+                        *edges[3] = FLAG_PATH;
+                        if (scratch->verbose)
+                            printf("Parity (%i/%i) block at %i/%i: Place path at cell %i direction R\n",
+                                   bw,bh,bx,by,group_cells[n]);
+                    }
+                }
+                if ((fill_walls_white && parity(x,y)) ||
+                    (fill_walls_black && !parity(x,y))) {
+                    if ((*edges[0] == FLAG_NONE) && 
+                        (y == by || dsf_canonify(dsf, x+(y-1)*w) != f)) {
+                        *edges[0] = FLAG_WALL;
+                        if (scratch->verbose)
+                            printf("Parity (%i/%i) block at %i/%i: Place wall at cell %i direction U\n",
+                                   bw,bh,bx,by,group_cells[n]);
+                    }
+                    if ((*edges[1] == FLAG_NONE) && 
+                        (y == by+bh-1 || dsf_canonify(dsf, x+(y+1)*w) != f)) {
+                        *edges[1] = FLAG_WALL;
+                        if (scratch->verbose)
+                            printf("Parity (%i/%i) block at %i/%i: Place wall at cell %i direction D\n",
+                                   bw,bh,bx,by,group_cells[n]);
+                    }
+                    if ((*edges[2] == FLAG_NONE) && 
+                        (x == bx || dsf_canonify(dsf, (x-1)+y*w) != f)) {
+                        *edges[2] = FLAG_WALL;
+                        if (scratch->verbose)
+                            printf("Parity (%i/%i) block at %i/%i: Place wall at cell %i direction L\n",
+                                   bw,bh,bx,by,group_cells[n]);
+                    }
+                    if ((*edges[3] == FLAG_NONE) && 
+                        (x == bx+bw-1 || dsf_canonify(dsf, (x+1)+y*w) != f)) {
+                        *edges[3] = FLAG_WALL;
+                        if (scratch->verbose)
+                            printf("Parity (%i/%i) block at %i/%i: Place wall at cell %i direction R\n",
+                                   bw,bh,bx,by,group_cells[n]);
+                    }
+                }
+            }
+            result = true;
+            goto finish;
+        }
+    }
+    
+finish:
+    sfree(group_cells);
+    sfree(processed_cells);
+    sfree(dsf);
+    return result;
+}
+
+static bool solve_parity(game_state *state, struct solver_scratch *scratch) {
+    int w,h,x,y;
+    scratch->island_counter = 0;
+/*    for (h=2;h<=state->h;h++) 
+    for (w=2;w<=state->w;w++) { */
+    for (h=state->h;h>=2;h--) 
+    for (w=state->w;w>=2;w--) {
+        for (y=0;y<=state->h-h;y++)
+        for (x=0;x<=state->w-w;x++) {
+            if (!scratch->done_islands[scratch->island_counter])
+                if (parity_check_block(state, scratch, x, y, w, h)) return true;
+            scratch->island_counter++;
+        }
+    }
+    return false;
+}
+
 static int walls_solve(game_state *state, int difficulty, bool verbose) {
+    int i;
+    int w = state->w;
+    int h = state->h;
+    int islands = (((w-1)*(w))*((h-1)*(h)))/4;
     struct solver_scratch *scratch = snew(struct solver_scratch);
-    scratch->loopdsf = snewn(state->w*state->h, int);
-    dsf_init(scratch->loopdsf, state->w*state->h);
+
+    scratch->loopdsf = snewn(w*h, int);
+    dsf_init(scratch->loopdsf, w*h);
+    scratch->done_islands = snewn(islands, bool);
     scratch->difficulty = difficulty;
     scratch->verbose = verbose;
+    for (i=0;i<islands;i++) scratch->done_islands[i] = false;
 
     while(true) {
         if (difficulty >= DIFF_EASY   && solve_single_cells(state, scratch)) continue;
+        if (!verbose && check_solution(state, false) == SOLVED) break;
         if (difficulty >= DIFF_NORMAL && solve_loops(state, scratch)) continue;
+        if (!verbose && check_solution(state, false) == SOLVED) break;
         if (difficulty >= DIFF_TRICKY && solve_partitions(state, scratch)) continue;
+        if (!verbose && check_solution(state, false) == SOLVED) break;
+        if (difficulty >= DIFF_HARD && solve_parity(state, scratch)) continue;
         break;
     }
 
+    sfree(scratch->done_islands);
     sfree(scratch->loopdsf);
     sfree(scratch);
     return check_solution(state, false);
@@ -864,9 +1125,9 @@ static void count_edges(unsigned char edge, char **e, int *erun, int *wrun) {
         *wrun = *erun = 0;
     }
     else if ((edge & FLAG_WALL) && *erun > 0) {
-        while (*erun >= 26) {
+        while (*erun >= 25) {
             *(*e)++ = 'z';
-            *erun -= 26;
+            *erun -= 25;
         }
         if (*erun == 0) *wrun = 0;
         else {
@@ -905,7 +1166,6 @@ static char *new_game_desc(const game_params *params, random_state *rs,
         wallnum = bordernum = 0;
         new = new_state(params);
         generate_hamiltonian_path(new, rs);
-        /* print_grid(new); */
 
         for (i=0;i<w*(h+1);i++)
             if ((new->edge_h[i] & FLAG_WALL) > 0x00)
@@ -924,7 +1184,6 @@ static char *new_game_desc(const game_params *params, random_state *rs,
             if (wi<vo) {
                 int xh, yh;
                 xh = wi%w; yh = wi/w;
-                /* printf("Horizontal edge at %i/%i (%i)\n",xh,yh,wi); */
                 if ((xh == 0     && yh == 0 && ((new->edge_v[0]           & FLAG_WALL) == 0x00)) ||
                     (xh == (w-1) && yh == 0 && ((new->edge_v[w]           & FLAG_WALL) == 0x00)) ||
                     (xh == 0     && yh == h && ((new->edge_v[(w+1)*(h-1)] & FLAG_WALL) == 0x00)) ||
@@ -938,7 +1197,6 @@ static char *new_game_desc(const game_params *params, random_state *rs,
             else {
                 int xv, yv;
                 xv = (wi-vo)%(w+1); yv = (wi-vo)/(w+1);
-                /* printf("Vertical edge at %i/%i (%i)\n",xv,yv,wi-vo); */
                 if ((xv == 0 && yv == 0     && ((new->edge_h[0]           & FLAG_WALL) == 0x00)) ||
                     (xv == w && yv == 0     && ((new->edge_h[w-1]         & FLAG_WALL) == 0x00)) ||
                     (xv == 0 && yv == (h-1) && ((new->edge_h[w*h]         & FLAG_WALL) == 0x00)) ||
@@ -964,7 +1222,6 @@ static char *new_game_desc(const game_params *params, random_state *rs,
             }
             free_state(tmp);
         }
-        print_grid(new);
         if (params->difficulty == DIFF_EASY) break;
         tmp = dup_state(new);
         result = walls_solve(tmp, params->difficulty-1, false);
@@ -989,6 +1246,7 @@ static char *new_game_desc(const game_params *params, random_state *rs,
     for (x=0;x<w;x++)
         count_edges(new->edge_h[y*w+x], &e, &erun, &wrun);
     if(wrun > 0) e += sprintf(e, "%d", wrun);
+    while (erun >= 25) {*e++ = 'z'; erun -= 25; }
     if(erun > 0) *e++ = ('a' + erun - 1);
     *e++ = ',';
     erun = wrun = 0;
@@ -996,10 +1254,10 @@ static char *new_game_desc(const game_params *params, random_state *rs,
     for (x=0;x<=w;x++) 
         count_edges(new->edge_v[y*(w+1)+x], &e, &erun, &wrun);
     if(wrun > 0) e += sprintf(e, "%d", wrun);
+    while (erun >= 25) {*e++ = 'z'; erun -= 25; }
     if(erun > 0) *e++ = ('a' + erun - 1);
     *e++ = '\0';
-    printf(" - %zu/%d\n", strlen(desc), (w+1)*h + w*(h+1) + (w*h) + 1);
-
+    printf("Description: %s\n", desc);
     free_state(new);
     sfree(wallidx);
 
@@ -1028,13 +1286,21 @@ static game_state *new_game(midend *me, const game_params *params,
             }
             while (*desc && isdigit((unsigned char)*desc)) desc++;
         }
-        else if(*desc >= 'a' && *desc <= 'z') {
+        else if(*desc == 'z') {
+            for (c=25;c>0;c--) {
+                if (fh) state->edge_h[i] = FLAG_NONE;
+                else    state->edge_v[i] = FLAG_NONE;
+                i++;
+            }
+            desc++;
+        }
+        else if(*desc >= 'a' && *desc < 'z') {
             for (c = *desc - 'a' + 1; c > 0; c--) {
                 if (fh) state->edge_h[i] = FLAG_NONE;
                 else    state->edge_v[i] = FLAG_NONE;
                 i++;
             }
-            if (*desc < 'z' && i < (fh ? w*(h+1) : (w+1)*h)) {
+            if (i < (fh ? w*(h+1) : (w+1)*h)) {
                 if (fh) state->edge_h[i] = FLAG_WALL | FLAG_FIXED;
                 else    state->edge_v[i] = FLAG_WALL | FLAG_FIXED;
                 i++;
@@ -1042,14 +1308,14 @@ static game_state *new_game(midend *me, const game_params *params,
             desc++;
         }
         else if (*desc == ',') {
-            /* printf("%d/%d horizontals\n", i, w*(h+1)); */
+            printf("i: %i, w*(h+1): %i\n",i, w*(h+1));
             assert(i == w*(h+1));
             fh = false;
             i = 0;
             desc++;
         }
     }
-    /* printf("%d/%d verticals\n", i, (w+1)*h); */
+    printf("i: %i, (w+1)*h: %i\n",i, (w+1)*h);
     assert(i == (w+1)*h);
     return state;
 }
@@ -1558,13 +1824,17 @@ static void game_redraw(drawing *dr, game_drawstate *ds,
         else if ((x%8 == 0) && (y%8 == 0)) {
             if (ui->show_grid) {
                 if (cx>0 && cy>0)
-                    newcell[i] |= CURSOR(cx-1,cy-1) ? 0x0300 : ((cx-1)^(cy-1))&1 ? 0x0100:0x0200;
+                    newcell[i] |= CURSOR(cx-1,cy-1) ? 0x0300 : 
+                                  parity(cx-1,cy-1) ? 0x0100 : 0x0200;
                 if (cx>0 && cy<h)
-                    newcell[i] |= CURSOR(cx-1,cy)   ? 0x0c00 : ((cx-1)^ cy)   &1 ? 0x0400:0x0800;
+                    newcell[i] |= CURSOR(cx-1,cy)   ? 0x0c00 :
+                                  parity(cx-1,cy)   ? 0x0400 : 0x0800;
                 if (cx<w && cy>0)
-                    newcell[i] |= CURSOR(cx,cy-1)   ? 0x3000 : ( cx   ^(cy-1))&1 ? 0x1000:0x2000;
+                    newcell[i] |= CURSOR(cx,cy-1)   ? 0x3000 :
+                                  parity(cx,cy-1)   ? 0x1000 : 0x2000;
                 if (cx<w && cy<h)
-                    newcell[i] |= CURSOR(cx,cy)     ? 0xc000 : ( cx   ^ cy)   &1 ? 0x4000:0x8000;
+                    newcell[i] |= CURSOR(cx,cy)     ? 0xc000 :
+                                  parity(cx,cy)     ? 0x4000 : 0x8000;
             }
             if (cx > 0) newcell[i] |= state->edge_h[(cx-1)+cy*w]     & (FLAG_WALL | FLAG_FIXED);
             if (cx < w) newcell[i] |= state->edge_h[cx+cy*w]         & (FLAG_WALL | FLAG_FIXED);
@@ -1575,8 +1845,8 @@ static void game_redraw(drawing *dr, game_drawstate *ds,
         /* Horizontal edge cells */
         else if (y%8 == 0) {
             if (ui->show_grid) {
-                if (cy > 0) newcell[i] |= CURSOR(cx,cy-1) ? 0x3300 : (cx^(cy-1))&1 ? 0x1100:0x2200;
-                if (cy < h) newcell[i] |= CURSOR(cx,cy)   ? 0xcc00 : (cx^ cy)   &1 ? 0x4400:0x8800;
+                if (cy > 0) newcell[i] |= CURSOR(cx,cy-1) ? 0x3300 : parity(cx,cy-1) ? 0x1100:0x2200;
+                if (cy < h) newcell[i] |= CURSOR(cx,cy)   ? 0xcc00 : parity(cx,cy)   ? 0x4400:0x8800;
             }
             newcell[i] |= state->edge_h[cx+cy*w] & (FLAG_WALL|FLAG_FIXED);
             if (x%8==4) {
@@ -1588,8 +1858,10 @@ static void game_redraw(drawing *dr, game_drawstate *ds,
         /* Vertical edge cells */
         else if (x%8 == 0) {
             if (ui->show_grid) {
-                if (cx > 0) newcell[i] |= CURSOR(cx-1,cy) ? 0x0f00 : ((cx-1)^cy)&1 ? 0x0500:0x0a00;
-                if (cx < w) newcell[i] |= CURSOR(cx,cy)   ? 0xf000 : ( cx   ^cy)&1 ? 0x5000:0xa000;
+                if (cx > 0) newcell[i] |= CURSOR(cx-1,cy) ? 0x0f00 :
+                                          parity(cx-1,cy) ? 0x0500 : 0x0a00;
+                if (cx < w) newcell[i] |= CURSOR(cx,cy)   ? 0xf000 :
+                                          parity(cx,cy)   ? 0x5000 : 0xa000;
             }
             newcell[i] |= state->edge_v[cx+cy*(w+1)] & (FLAG_WALL|FLAG_FIXED);
             if (y%8==4) {
@@ -1601,7 +1873,8 @@ static void game_redraw(drawing *dr, game_drawstate *ds,
         /* Path cells */
         else {
             if (ui->show_grid) 
-                for (j=0;j<4;j++) newcell[i] |= (CURSOR(cx,cy) ? 0x03 : (cx^cy)&1 ? 0x01:0x02) << (8+2*j);
+                for (j=0;j<4;j++) newcell[i] |= (CURSOR(cx,cy) ? 0x03 :
+                                                 parity(cx,cy) ? 0x01:0x02) << (8+2*j);
             if (x%8==4 && y%8<=4)
                 newcell[i] |= flashflag|(state->edge_h[cx+cy*w]         & (FLAG_PATH|cellerror));
             if (x%8==4 && y%8>=4)
@@ -1653,7 +1926,7 @@ static void game_get_cursor_location(const game_ui *ui,
 }
 
 static int game_status(const game_state *state) {
-    return 0;
+    return state->completed ? +1 : 0;
 }
 
 static bool game_timing_state(const game_state *state, game_ui *ui) {
@@ -1713,31 +1986,40 @@ const struct game thegame = {
 #ifdef DEVELOP
 
 #include <time.h>
+
+static void print_grid(const game_state *state) {
+    char *grid;
+    grid = game_text_format(state);
+    printf("%s", grid);
+    sfree(grid);
+}
+
 int main(int argc, char **argv) {
     game_params *p;
     random_state *rs;
     game_state *state;
     char *desc;
     int i;
+    int solved;
     time_t seed = time(NULL);
 
     rs = random_new((void*)&seed, sizeof(time_t));
     /* rs = random_new("123456", 6); */
     p = default_params();
-    p->w = 6;
-    p->h = 5;
-    p->difficulty = DIFF_TRICKY;
+    p->w = 15;
+    p->h = 4;
+    p->difficulty = DIFF_HARD;
 
-    for (i=0;i<10000;i++) {
+    for (i=0;i<1000;i++) {
         desc = new_game_desc(p, rs, NULL, 0);
-        printf("%s\n", desc);
         state = new_game(NULL, p, desc);
-        // print_grid(state);
-        walls_solve(state, p->difficulty, false);
+        walls_solve(state, DIFF_HARD, false);
         print_grid(state);
+        solved = check_solution(state, true);
+        printf("Solved: %s\n", solved == 0 ? "SOLVED" : solved == 1 ? "INVALID" : "AMBIGUOUS");
         free_state(state);
         sfree(desc);
-        printf("\n");
+        if (solved != 0) break;
     }
 
     random_free(rs);
