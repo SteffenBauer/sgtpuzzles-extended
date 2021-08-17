@@ -6,6 +6,42 @@ void fatal(const char *fmt, ...) {
     exit(0);
 }
 
+void dsf_print_groups(int *dsf, int size) {
+    int i,j,n;
+    bool found;
+    int processed_count = 0, group_count;
+    int *processed_cells = snewn(size, int);
+    int *group_cells = snewn(size, int);
+    for (i=0;i<size;i++) processed_cells[i] = -1;
+    while(true) {
+        group_count = 0;
+        for (i=0;i<size;i++) {
+            found = false;
+            for (j=0;j<size;j++) {
+                if (processed_cells[j] == i) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) break;
+        }
+        if (i==size) break;
+        printf("Group ID %i, size %i: ", dsf_canonify(dsf, i), dsf_size(dsf, i));
+        i = dsf_canonify(dsf, i);
+        for (n = 0; n < size; n++) {
+            if (dsf_canonify(dsf, n) == i) {
+                processed_cells[processed_count++] = n;
+                group_cells[group_count++] = n;
+            }
+        }
+        for (n=0;n<group_count;n++)
+            printf("%i ", group_cells[n]);
+        printf("\n");
+    }
+    sfree(processed_cells);
+    sfree(group_cells);
+}
+
 int main(int argc, char *argv[]) {
     int w = 4;
     int h = 4;
@@ -58,8 +94,8 @@ int main(int argc, char *argv[]) {
     dsf_merge(dsf, 15, 11);
     dsf_merge(dsf, 15, 14);
 
-    for (i=0;i<16;i++)
-        printf("Cell %i is member of dsf %i (size %i)\n", i, dsf_canonify(dsf, i), dsf_size(dsf, i));
+    dsf_print(dsf, w*h);
+    dsf_print_groups(dsf, w*h);
 
     sfree(dsf);
 
