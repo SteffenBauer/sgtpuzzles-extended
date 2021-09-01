@@ -1,0 +1,21 @@
+SAVEFILE:41:Simon Tatham's Portable Puzzle Collection
+VERSION :1:1
+GAME    :5:Creek
+PARAMS  :5:4x4dt
+CPARAMS :5:4x4dt
+SEED    :15:735338453632274
+DESC    :13:f32a1a2b1b34f
+AUXINFO :32:60851158ec0dd076ad3f6be83d94b0a9
+NSTATES :2:12
+STATEPOS:2:12
+MOVE    :19:B2,2;B3,2;B2,3;B3,3
+MOVE    :4:W3,1
+MOVE    :4:B3,0
+MOVE    :4:W2,1
+MOVE    :4:B1,1
+MOVE    :4:W1,1
+MOVE    :9:B1,0;B2,0
+MOVE    :9:B0,0;B0,1
+MOVE    :4:B1,2
+MOVE    :4:W1,2
+MOVE    :4:B0,2

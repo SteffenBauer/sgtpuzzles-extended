@@ -2338,11 +2338,11 @@ static void game_print(drawing *dr, const game_state *state, int tilesize)
  */
 
 #ifdef COMBINED
-#define thegame unequal
+#define thegame unequalplus
 #endif
 
 const struct game thegame = {
-    "Unequal", "games.unequal", "unequal",
+    "Unequal+", "games.unequal+", "unequal+",
     default_params,
     game_fetch_preset, NULL,
     decode_params,

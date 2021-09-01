@@ -3156,11 +3156,11 @@ static void game_print(drawing *dr, const game_state *state, int tilesize)
 }
 
 #ifdef COMBINED
-#define thegame undead
+#define thegame undeadplus
 #endif
 
 const struct game thegame = {
-    "Undead", "games.undead", "undead",
+    "Undead+", "games.undead+", "undead+",
     default_params,
     game_fetch_preset, NULL,
     decode_params,

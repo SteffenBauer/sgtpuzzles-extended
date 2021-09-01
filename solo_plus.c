@@ -5706,11 +5706,11 @@ static void game_print(drawing *dr, const game_state *state, int tilesize)
 }
 
 #ifdef COMBINED
-#define thegame solo
+#define thegame soloplus
 #endif
 
 const struct game thegame = {
-    "Solo", "games.solo", "solo",
+    "Solo+", "games.solo+", "solo+",
     default_params,
     game_fetch_preset, NULL,
     decode_params,
