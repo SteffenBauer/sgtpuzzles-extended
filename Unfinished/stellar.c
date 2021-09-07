@@ -50,6 +50,7 @@
 #define CODE_RIGHT  0x20
 #define CODE_TOP    0x40
 #define CODE_BOTTOM 0x80
+#define CODE_CROSS  0x100
 
 #define NO_ERROR     0x00
 #define ERROR_STAR   0x01
@@ -202,7 +203,7 @@ static const char *validate_params(const game_params *params, bool full) {
 
 struct game_state {
     struct game_params params;
-    unsigned char *grid;
+    unsigned short *grid;
     unsigned char *errors;
     int solved;
     int cheated;
@@ -216,7 +217,7 @@ static game_state *new_state(const game_params *params) {
     state->params.diff = params->diff;
     
     v = params->size * params->size;
-    state->grid = snewn(v, unsigned char);
+    state->grid = snewn(v, unsigned short);
     state->errors = snewn(v, unsigned char);
     for (i=0;i<v;i++) {
         state->grid[i] = 0x00;
@@ -235,7 +236,7 @@ static game_state *dup_game(const game_state *state) {
     ret->params.diff = state->params.diff;
     
     v = ret->params.size * ret->params.size;
-    ret->grid = snewn(v, unsigned char);
+    ret->grid = snewn(v, unsigned short);
     ret->errors = snewn(v, unsigned char);
     for (i=0;i<v;i++) {
         ret->grid[i] = state->grid[i];
@@ -491,10 +492,10 @@ void initialize_solver(game_state *state) {
 unsigned char solver_combinations(game_state *state) {
     int done_something;
     int i, idx, size, c, rowcol;
-    unsigned char *newrowcol;
+    unsigned short *newrowcol;
 
     size = state->params.size;  
-    newrowcol = snewn(size, unsigned char);
+    newrowcol = snewn(size, unsigned short);
     done_something = SOLVER_NO_PROGRESS;
     
     for (c=0;c<2;c++)
@@ -655,12 +656,12 @@ unsigned char solve_sequential(game_state *state) {
 unsigned char solve_recursive(game_state *state, int depth) {
     int t, i, j, open, size;
     game_state *test_state;
-    unsigned char *sol_grid;
+    unsigned short *sol_grid;
     unsigned char first_solution;
     unsigned char sol;
       
     size = state->params.size;
-    sol_grid = snewn(size*size, unsigned char);
+    sol_grid = snewn(size*size, unsigned short);
     first_solution = false;
     
     open = 0;
@@ -744,7 +745,7 @@ static char *new_game_desc(const game_params *params, random_state *rs,
     int i, index, r, count;
     char *e;
     char *desc; 
-    unsigned char c;
+    unsigned short c;
     
     pos = snewn(params->size, int);    
     new = new_state(params);
@@ -969,7 +970,7 @@ struct game_drawstate {
     int tilesize, started, solved;
     int size;
 
-    unsigned char *grid;
+    unsigned short *grid;
     unsigned char *grid_errors;
     
     int hx, hy, hshow, hpencil; /* as for game_ui. */
@@ -1002,6 +1003,12 @@ static char *interpret_move(const game_state *state, game_ui *ui,
             }
             if (button == 'c' || button == 'C' || button == '2') {
                 sprintf(buf, (ui->hpencil == 0) ? "C%d" : "c%d" , hg);
+                if (!ui->hcursor) ui->hpencil = ui->hshow = 0;
+                return dupstr(buf);
+            }
+            if (button == 'x' || button == 'X' || button == '3' ||
+                button == '-' || button == '_') {
+                sprintf(buf, (ui->hpencil == 0) ? "X%d" : "x%d" , hg);
                 if (!ui->hcursor) ui->hpencil = ui->hshow = 0;
                 return dupstr(buf);
             }
@@ -1106,16 +1113,19 @@ static game_state *execute_move(const game_state *state,
             solver = true;
         }
         if (c == 'S' || c == 'C' || c == 'E' ||
+            c == 'X' || c == 'x' ||
             c == 's' || c == 'c') {
             move++;
             sscanf(move, "%d%n", &x, &n);
             if (c == 'S') ret->grid[x] = CODE_STAR;
             if (c == 'C') ret->grid[x] = CODE_CLOUD;
+            if (c == 'X') ret->grid[x] = CODE_CROSS;
             if (c == 'E') ret->grid[x] = 0x00;
-            if (c == 's' || c == 'c') { 
-                ret->grid[x] ^= (c == 's' ? CODE_STAR : CODE_CLOUD); 
+            if (c == 's' || c == 'c' || c == 'x') { 
+                ret->grid[x] ^= (c == 's' ? CODE_STAR : c == 'c' ? CODE_CLOUD : CODE_CROSS); 
                 if ((ret->grid[x] & CODE_STAR) || 
-                    (ret->grid[x] & CODE_CLOUD))
+                    (ret->grid[x] & CODE_CLOUD) ||
+                    (ret->grid[x] & CODE_CROSS))
                     ret->grid[x] |= CODE_GUESS;
                 else
                     ret->grid[x] &= !CODE_GUESS;
@@ -1186,7 +1196,7 @@ static game_drawstate *game_new_drawstate(drawing *dr, const game_state *state)
     ds->started = ds->solved = false;
     ds->size = state->params.size;
 
-    ds->grid = snewn((ds->size * ds->size), unsigned char);
+    ds->grid = snewn((ds->size * ds->size), unsigned short);
     ds->grid_errors = snewn((ds->size * ds->size), unsigned char);
 
     for (i=0;i<(ds->size * ds->size); i++) {
@@ -1291,8 +1301,24 @@ static void draw_cloud_template(drawing *dr, game_drawstate *ds,
     return;
 }
 
+static void draw_cross_template(drawing *dr, game_drawstate *ds,
+                               int x, int y, int size, 
+                               unsigned char err, int hflash) {
+    double thick = (size <= 21 ? 1 : 2.5);
+
+    draw_thick_line(dr, thick,
+        x-size/3, y-size/3, x+size/3, y+size/3,
+        err ? COL_ERROR : hflash ? COL_FLASH : COL_GRID);  
+    
+    draw_thick_line(dr, thick,
+        x+size/3, y-size/3, x-size/3, y+size/3,
+        err ? COL_ERROR : hflash ? COL_FLASH : COL_GRID);  
+    
+    return;
+}
+
 static void draw_pencils(drawing *dr, game_drawstate *ds,
-                             unsigned char pencil, 
+                             unsigned short pencil, 
                              int x, int y, int hflash) {
     int dx, dy;
     int t = ds->tilesize;
@@ -1306,11 +1332,14 @@ static void draw_pencils(drawing *dr, game_drawstate *ds,
     if (pencil & CODE_CLOUD)
         draw_cloud_template(dr, ds, dx+t/2, dy, t/2, false, hflash);
 
+    if (pencil & CODE_CROSS)
+        draw_cross_template(dr, ds, dx, dy+t/2, t/2, false, hflash);
+
     return;
 }
 
 static void draw_planet(drawing *dr, game_drawstate *ds,
-                             unsigned char planet, unsigned char error, 
+                             unsigned short planet, unsigned char error, 
                              int x, int y, int hflash) {
     int dx,dy;
     int t = ds->tilesize;
@@ -1395,6 +1424,19 @@ static void draw_cloud(drawing *dr, game_drawstate *ds,
      return;
 }
 
+static void draw_cross(drawing *dr, game_drawstate *ds,
+                             unsigned char error, 
+                             int x, int y, int hflash) {
+    int dx,dy;
+    int t = ds->tilesize;
+    dx = BORDER+(x*t)+(t/2);
+    dy = BORDER+(y*t)+(t/2);
+
+    draw_cross_template(dr, ds, dx, dy, t, false, hflash);
+
+    return;
+}
+
 #define FLASH_TIME 0.7F
 
 static void game_redraw(drawing *dr, game_drawstate *ds, 
@@ -1433,7 +1475,8 @@ static void game_redraw(drawing *dr, game_drawstate *ds,
     
     for (y=0;y<ds->size;y++) 
     for (x=0;x<ds->size;x++) {
-        unsigned char c, err;
+        unsigned short c;
+        unsigned char err;
         
         stale = false;
         c = state->grid[x+y*ds->size];
@@ -1470,7 +1513,10 @@ static void game_redraw(drawing *dr, game_drawstate *ds,
             }
             else if (c & CODE_CLOUD) {
                 draw_cloud(dr, ds, err, x, y, hflash);
-            }    
+            }
+            else if (c & CODE_CROSS) {
+                draw_cross(dr, ds, err, x, y, hflash);
+            }
             draw_update(dr, BORDER+t*x, BORDER+t*y, t-1, t-1);
         }    
     }
