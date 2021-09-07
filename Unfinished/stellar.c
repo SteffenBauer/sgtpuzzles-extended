@@ -205,8 +205,8 @@ struct game_state {
     struct game_params params;
     unsigned short *grid;
     unsigned char *errors;
-    int solved;
-    int cheated;
+    bool solved;
+    bool cheated;
 };
 
 static game_state *new_state(const game_params *params) {
@@ -261,7 +261,7 @@ int get_index(int size, int c, int rowcol, int i) {
                     (rowcol + size * i);
 }
 
-unsigned char check_line(int star_pos, int cloud_pos, int planet_pos, int planet_illumination) {
+bool check_line(int star_pos, int cloud_pos, int planet_pos, int planet_illumination) {
     
     if (planet_illumination == ILLUMINATION_LEFTTOP) {
         if ((cloud_pos < star_pos || planet_pos < cloud_pos) && 
@@ -293,9 +293,9 @@ int planet_position(const game_state *state, int c, int rowcol) {
     return ret;
 }
 
-unsigned char check_solution(game_state *state) {
+bool check_solution(game_state *state) {
     
-    unsigned char solved = true;
+    bool solved = true;
     int x, y;
     int size = state->params.size;
     for (x = 0; x < size; x++)
@@ -433,10 +433,10 @@ void cleanup_grid(game_state *state) {
     return;
 }
 
-unsigned char next_guess(struct game_state *game, int *pos, int idx) {
+bool next_guess(struct game_state *game, int *pos, int idx) {
     int i, j;
     int size = game->params.size;
-    unsigned char finished;
+    bool finished;
 
     if (idx >= 2*size) return false;
     
@@ -596,9 +596,9 @@ unsigned char solve_bruteforce(game_state *state) {
     int *positions;
     struct game_state *test_game;
     int i, j, size;
-    unsigned char bp;
-    unsigned char sol;
-    unsigned char first_solution = false;
+    bool bp;
+    bool sol;
+    bool first_solution = false;
     
     size = state->params.size;
     
@@ -657,7 +657,7 @@ unsigned char solve_recursive(game_state *state, int depth) {
     int t, i, j, open, size;
     game_state *test_state;
     unsigned short *sol_grid;
-    unsigned char first_solution;
+    bool first_solution;
     unsigned char sol;
       
     size = state->params.size;
@@ -879,7 +879,7 @@ static game_state *new_game(midend *me, const game_params *params, const char *d
             }
             else {
                 assert(!"Invalid character in game description!");
-                return NULL;                
+                return NULL;
             }
         } 
         else {
@@ -967,14 +967,16 @@ static void game_changed_state(game_ui *ui, const game_state *oldstate,
 #define BORDER (TILE_SIZE/2)
 
 struct game_drawstate {
-    int tilesize, started, solved;
+    int tilesize;
+    bool started, solved;
     int size;
 
     unsigned short *grid;
     unsigned char *grid_errors;
     
-    int hx, hy, hshow, hpencil; /* as for game_ui. */
-    int hflash;
+    int hx, hy; 
+    bool hshow, hpencil; /* as for game_ui. */
+    bool hflash;
  };
 
 static char *interpret_move(const game_state *state, game_ui *ui, 
@@ -1033,12 +1035,12 @@ static char *interpret_move(const game_state *state, game_ui *ui,
               case CURSOR_LEFT:   ui->hx -= (ui->hx > 0)     ? 1 : 0; break;
             }
         ui->hshow = ui->hcursor = 1;
-        return "";
+        return UI_UPDATE;
     }
     if (ui->hshow && button == CURSOR_SELECT) {
         ui->hpencil = 1 - ui->hpencil;
         ui->hcursor = 1;
-        return "";
+        return UI_UPDATE;
     }
 
     if (g >= 0 && !(state->grid[g] & CODE_PLANET)) {
@@ -1046,12 +1048,12 @@ static char *interpret_move(const game_state *state, game_ui *ui,
             if (button == LEFT_BUTTON) {
                 ui->hshow = 1; ui->hpencil = 0; ui->hcursor = 0;
                 ui->hx = gx; ui->hy = gy;
-                return "";
+                return UI_UPDATE;
             }
             else if (button == RIGHT_BUTTON) {
                 ui->hshow = 1; ui->hpencil = 1; ui->hcursor = 0;
                 ui->hx = gx; ui->hy = gy;
-                return "";
+                return UI_UPDATE;
             }
         }
 
@@ -1061,31 +1063,31 @@ static char *interpret_move(const game_state *state, game_ui *ui,
                     if (gx == ui->hx && gy == ui->hy) {
                         ui->hshow = 0; ui->hpencil = 0; ui->hcursor = 0;
                         ui->hx = 0; ui->hy = 0;
-                        return "";
+                        return UI_UPDATE;
                     }
                     else {
                         ui->hshow = 1; ui->hpencil = 0; ui->hcursor = 0;
                         ui->hx = gx; ui->hy = gy;
-                        return "";
+                        return UI_UPDATE;
                     }
                 }
                 else {
                     ui->hshow = 1; ui->hpencil = 0; ui->hcursor = 0;
                     ui->hx = gx; ui->hy = gy;
-                    return "";
+                    return UI_UPDATE;
                 }
             }
             else if (button == RIGHT_BUTTON) {
                 if (ui->hpencil == 0) {
                     ui->hshow = 1; ui->hpencil = 1; ui->hcursor = 0;
                     ui->hx = gx; ui->hy = gy;
-                    return "";
+                    return UI_UPDATE;
                 }
                 else {
                     if (gx == ui->hx && gy == ui->hy) {
                         ui->hshow = 0; ui->hpencil = 0; ui->hcursor = 0;
                         ui->hx = 0; ui->hy = 0;
-                        return "";
+                        return UI_UPDATE;
                     }
                 }
             }
@@ -1100,8 +1102,8 @@ static game_state *execute_move(const game_state *state,
 {
     int x, n;
     char c;
-    int correct; 
-    int solver; 
+    bool correct; 
+    bool solver; 
 
     game_state *ret = dup_game(state);
     solver = false;
@@ -1203,7 +1205,7 @@ static game_drawstate *game_new_drawstate(drawing *dr, const game_state *state)
         ds->grid[i] = ds->grid_errors[i] = 0x00;
     }
 
-    ds->hshow = ds->hpencil = ds->hflash = 0;
+    ds->hshow = ds->hpencil = ds->hflash = false;
     ds->hx = ds->hy = 0;
    
     return ds;
@@ -1246,7 +1248,7 @@ static void draw_cell_background(drawing *dr, game_drawstate *ds,
 
 static void draw_star_template(drawing *dr, game_drawstate *ds,
                                int x, int y, int size, 
-                               unsigned char err, int hflash) {
+                               unsigned char err, bool hflash) {
 
     int poly[20];
     float c1,c2,s1,s2;
@@ -1294,7 +1296,7 @@ static void draw_star_template(drawing *dr, game_drawstate *ds,
 
 static void draw_cloud_template(drawing *dr, game_drawstate *ds,
                                int x, int y, int size, 
-                               unsigned char err, int hflash) {
+                               unsigned char err, bool hflash) {
 
     draw_rect(dr, x-size/3, y-size/3, 2*size/3 -1, 2*size/3 -1, 
               err ? COL_ERROR : hflash ? COL_FLASH : COL_CLOUD);        
@@ -1303,7 +1305,7 @@ static void draw_cloud_template(drawing *dr, game_drawstate *ds,
 
 static void draw_cross_template(drawing *dr, game_drawstate *ds,
                                int x, int y, int size, 
-                               unsigned char err, int hflash) {
+                               unsigned char err, bool hflash) {
     double thick = (size <= 21 ? 1 : 2.5);
 
     draw_thick_line(dr, thick,
@@ -1319,7 +1321,7 @@ static void draw_cross_template(drawing *dr, game_drawstate *ds,
 
 static void draw_pencils(drawing *dr, game_drawstate *ds,
                              unsigned short pencil, 
-                             int x, int y, int hflash) {
+                             int x, int y, bool hflash) {
     int dx, dy;
     int t = ds->tilesize;
 
@@ -1340,7 +1342,7 @@ static void draw_pencils(drawing *dr, game_drawstate *ds,
 
 static void draw_planet(drawing *dr, game_drawstate *ds,
                              unsigned short planet, unsigned char error, 
-                             int x, int y, int hflash) {
+                             int x, int y, bool hflash) {
     int dx,dy;
     int t = ds->tilesize;
     int black = (hflash ? COL_FLASH : COL_GRID);
@@ -1399,7 +1401,7 @@ static void draw_planet(drawing *dr, game_drawstate *ds,
 
 static void draw_star(drawing *dr, game_drawstate *ds,
                              unsigned char error, 
-                             int x, int y, int hflash) {
+                             int x, int y, bool hflash) {
     int dx,dy;
     int t = ds->tilesize;
 
@@ -1413,7 +1415,7 @@ static void draw_star(drawing *dr, game_drawstate *ds,
 
 static void draw_cloud(drawing *dr, game_drawstate *ds,
                              unsigned char error, 
-                             int x, int y, int hflash) {
+                             int x, int y, bool hflash) {
     int dx,dy;
     int t = ds->tilesize;
     dx = BORDER+(x*t)+(t/2);
@@ -1426,7 +1428,7 @@ static void draw_cloud(drawing *dr, game_drawstate *ds,
 
 static void draw_cross(drawing *dr, game_drawstate *ds,
                              unsigned char error, 
-                             int x, int y, int hflash) {
+                             int x, int y, bool hflash) {
     int dx,dy;
     int t = ds->tilesize;
     dx = BORDER+(x*t)+(t/2);
@@ -1446,7 +1448,7 @@ static void game_redraw(drawing *dr, game_drawstate *ds,
                         float animtime, float flashtime)
 {
     int x, y;
-    int stale, hflash, hchanged;
+    bool stale, hflash, hchanged; 
     int t = ds->tilesize;
     hflash = (int)(flashtime * 5 / FLASH_TIME) % 2;
 
