@@ -1220,7 +1220,8 @@ static char *interpret_move(const game_state *state, game_ui *ui,
         return UI_UPDATE;
     }
 
-    else if (x < 0 || y < 0 || x >= w || y >= h) {
+    else if ((IS_MOUSE_DOWN(button) || IS_MOUSE_DRAG(button) || IS_MOUSE_RELEASE(button)) &&
+             (x < 0 || y < 0 || x >= w || y >= h)) {
         ui->cur_visible = false;
         ui->is_drag = false;
         ui->dx = ui->dy = -1;
