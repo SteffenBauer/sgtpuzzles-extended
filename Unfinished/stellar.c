@@ -1603,6 +1603,7 @@ const struct game thegame = {
     decode_ui,
     NULL,
     game_changed_state,
+    NULL, /* current_key_label */
     interpret_move,
     execute_move,
     TILE_SIZE, game_compute_size, game_set_size,

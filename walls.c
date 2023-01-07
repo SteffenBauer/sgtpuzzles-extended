@@ -1499,16 +1499,18 @@ static char *new_game_desc(const game_params *params, random_state *rs,
         result = walls_solve(tmp, difficulty-1, false);
         free_state(tmp);
         if (result == SOLVED) {
-            printf("Puzzle too easy - continue\n");
+            /* printf("Puzzle too easy - continue\n"); */
             free_state(new);
             continue;
         }
         break;
     }
-    printf("We have a puzzle! Solution:\n");
+
+    /* printf("We have a puzzle! Solution:\n");
     tmp = dup_state(new);
     result = walls_solve(tmp, difficulty, true);
     free_state(tmp);
+    */
 
     /* Encode walls */
     desc = snewn((w+1)*h + w*(h+1) + (w*h) + 1, char);
@@ -1529,7 +1531,7 @@ static char *new_game_desc(const game_params *params, random_state *rs,
     while (erun >= 25) {*e++ = 'z'; erun -= 25; }
     if(erun > 0) *e++ = ('a' + erun - 1);
     *e++ = '\0';
-    printf("Description: %s\n", desc);
+    /* printf("Description: %s\n", desc); */
     free_state(new);
     sfree(wallidx);
 
@@ -1580,14 +1582,14 @@ static game_state *new_game(midend *me, const game_params *params,
             desc++;
         }
         else if (*desc == ',') {
-            printf("i: %i, w*(h+1): %i\n",i, w*(h+1));
+            /* printf("i: %i, w*(h+1): %i\n",i, w*(h+1)); */
             assert(i == w*(h+1));
             fh = false;
             i = 0;
             desc++;
         }
     }
-    printf("i: %i, (w+1)*h: %i\n",i, (w+1)*h);
+    /* printf("i: %i, (w+1)*h: %i\n",i, (w+1)*h); */
     assert(i == (w+1)*h);
     return state;
 }
@@ -1609,7 +1611,7 @@ static char *solve_game(const game_state *state, const game_state *currstate,
     int voff = w*(h+1);
     
     game_state *solve_state = dup_game(state);
-    walls_solve(solve_state, DIFF_HARD, true);
+    walls_solve(solve_state, DIFF_HARD, false);
     p += sprintf(p, "S");
     for (i = 0; i < w*(h+1); i++) {
         if (solve_state->edge_h[i] == FLAG_WALL)
@@ -1802,7 +1804,7 @@ static char *interpret_move(const game_state *state, game_ui *ui,
         }
         else {
             ui->ndragcoords = -1;
-            printf("Clicked on cell %i/%i\n",fx,fy);
+            /* printf("Clicked on cell %i/%i\n",fx,fy); */
             if ((fx<0 && fy<0) || (fx>=w && fy<0) || (fx<0 && fy>=h) || (fx>=w && fy>=h)) return NULL;
             if      (fx<0 && x > cx)  dir = R;
             else if (fx>=w && x < cx) dir = L;
@@ -1850,7 +1852,7 @@ static game_state *execute_move(const game_state *state, const char *move) {
     int w = state->w;
     int h = state->h;
     game_state *ret = dup_game(state);
-    // printf("Move: '%s'\n", move);
+    /* printf("Move: '%s'\n", move); */
 
     while (*move) {
         c = *move;
@@ -2238,6 +2240,7 @@ const struct game thegame = {
     decode_ui,
     NULL, /* game_request_keys */
     game_changed_state,
+    NULL, /* current_key_label */
     interpret_move,
     execute_move,
     PREFERRED_TILE_SIZE, game_compute_size, game_set_size,

@@ -1140,6 +1140,23 @@ static void game_changed_state(game_ui *ui, const game_state *oldstate,
 {
 }
 
+static const char *current_key_label(const game_ui *ui,
+                                     const game_state *state, int button)
+{
+    int cell;
+    if (IS_CURSOR_SELECT(button) && ui->cur_visible) {
+        switch (state->soln[ui->cur_y*state->p.w+ui->cur_x]) {
+          case 0:
+            return button == CURSOR_SELECT ? "Black" : "White";
+          case +1:
+            return button == CURSOR_SELECT ? "White" : "Empty";
+          case -1:
+            return button == CURSOR_SELECT ? "Empty" : "Black";
+        }
+    }
+    return "";
+}
+
 #define PREFERRED_TILESIZE 32
 #define TILESIZE (ds->tilesize)
 #define BORDER TILESIZE
@@ -1220,7 +1237,8 @@ static char *interpret_move(const game_state *state, game_ui *ui,
         return UI_UPDATE;
     }
 
-    else if (x < 0 || y < 0 || x >= w || y >= h) {
+    else if ((x < 0 || y < 0 || x >= w || y >= h) && 
+            (button == LEFT_BUTTON || button == RIGHT_BUTTON)) {
         ui->cur_visible = false;
         ui->is_drag = false;
         ui->dx = ui->dy = -1;
@@ -1644,6 +1662,7 @@ const struct game thegame = {
     decode_ui,
     NULL, /* game_request_keys */
     game_changed_state,
+    current_key_label,
     interpret_move,
     execute_move,
     PREFERRED_TILESIZE, game_compute_size, game_set_size,
