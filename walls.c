@@ -262,7 +262,7 @@ static int check_solution(game_state *state, bool full) {
 
     int exit_count, exit1, exit2;
 
-    int *dsf;
+    DSF *dsf;
     int first_cell;
     bool mark_unconnected = false;
 
@@ -406,8 +406,8 @@ static int check_solution(game_state *state, bool full) {
     }
 
     /* Check if all cells are connected */
-    dsf = snewn(w*h,int);
-    dsf_init(dsf, w*h);
+    dsf = dsf_new(w*h);
+    dsf_reinit(dsf);
     for (y=0;y<h;y++)
     for (x=0;x<w;x++) {
         i = x+y*w;
@@ -421,7 +421,7 @@ static int check_solution(game_state *state, bool full) {
         if ((*edges[3] & FLAG_PATH) > 0x00 && x<w-1) dsf_merge(dsf, i, i+1);
     }
     first_cell = dsf_canonify(dsf, 0);
-    if (exit_count == 2 && dsf_canonify(dsf, exit1) == dsf_canonify(dsf, exit2)) {
+    if (exit_count == 2 && dsf_equivalent(dsf, exit1, exit2)) {
         mark_unconnected = true;
         first_cell = dsf_canonify(dsf, exit1);
     }
@@ -434,13 +434,13 @@ static int check_solution(game_state *state, bool full) {
             }
         }
     }
-    sfree(dsf);
+    dsf_free(dsf);
 
     return solved;
 }
 
 struct solver_scratch {
-    int *loopdsf;
+    DSF *loopdsf;
     bool *done_islands;
     int island_counter;
     bool exits_found;
@@ -595,12 +595,12 @@ static bool check_partition(const game_state *state) {
     int w = state->w;
     int h = state->h;
     unsigned char *edges[4];
-    int *dsf;
+    DSF *dsf;
     int first_cell;
 
     /* Check if all cells can be connected */
-    dsf = snewn(w*h,int);
-    dsf_init(dsf, w*h);
+    dsf = dsf_new(w*h);
+    dsf_reinit(dsf);
     for (y=0;y<h;y++)
     for (x=0;x<w;x++) {
         i = x+y*w;
@@ -616,11 +616,11 @@ static bool check_partition(const game_state *state) {
     first_cell = dsf_canonify(dsf, 0);
     for (i=0;i<w*h;i++) {
         if (dsf_canonify(dsf, i) != first_cell) {
-            sfree(dsf);
+            dsf_free(dsf);
             return false;
         }
     }
-    sfree(dsf);
+    dsf_free(dsf);
     return true;
 }
 
@@ -666,7 +666,7 @@ static bool parity_check_block(game_state *state, struct solver_scratch *scratch
     int h = state->h;
     int w = state->w;
     unsigned char *edges[4];
-    int *dsf;
+    DSF *dsf;
     bool found;
     bool result = false;
     int processed_count = 0;
@@ -676,8 +676,8 @@ static bool parity_check_block(game_state *state, struct solver_scratch *scratch
     scratch->done_islands[scratch->island_counter] = true;
 
     /* Build a dsf over the relevant area */
-    dsf = snewn(w*h,int);
-    dsf_init(dsf, w*h);
+    dsf = dsf_new(w*h);
+    dsf_reinit(dsf);
     for (y=by;y<by+bh;y++)
     for (x=bx;x<bx+bw;x++) {
         i = x+y*w;
@@ -890,7 +890,7 @@ static bool parity_check_block(game_state *state, struct solver_scratch *scratch
 finish_parity:
     sfree(group_cells);
     sfree(processed_cells);
-    sfree(dsf);
+    dsf_free(dsf);
     return result;
 }
 
@@ -1180,8 +1180,8 @@ static int walls_solve(game_state *state, int difficulty, bool verbose) {
     int islands = (((w-1)*(w))*((h-1)*(h)))/4;
     struct solver_scratch *scratch = snew(struct solver_scratch);
 
-    scratch->loopdsf = snewn(w*h, int);
-    dsf_init(scratch->loopdsf, w*h);
+    scratch->loopdsf = dsf_new(w*h);
+    dsf_reinit(scratch->loopdsf);
     scratch->done_islands = snewn(islands, bool);
     scratch->exits_found = false;
     scratch->difficulty = difficulty;
@@ -1203,7 +1203,7 @@ static int walls_solve(game_state *state, int difficulty, bool verbose) {
     }
 
     sfree(scratch->done_islands);
-    sfree(scratch->loopdsf);
+    dsf_free(scratch->loopdsf);
     sfree(scratch);
     return check_solution(state, false);
 }
@@ -1501,6 +1501,7 @@ static char *new_game_desc(const game_params *params, random_state *rs,
         if (result == SOLVED) {
             /* printf("Puzzle too easy - continue\n"); */
             free_state(new);
+            if (difficulty == DIFF_HARD && (w>7 || h>8)) difficulty--;
             continue;
         }
         break;
@@ -1691,6 +1692,11 @@ struct game_ui {
     bool cursor_active;    /* true if cursor is shown */
 
     bool show_grid;        /* true if checkerboard grid is shown */
+    
+    /* Path dragging state */
+    bool path_dragging;    /* true if currently dragging a path */
+    int drag_last_x;       /* last cell x coordinate during drag */
+    int drag_last_y;       /* last cell y coordinate during drag */
 };
 
 
@@ -1707,19 +1713,17 @@ static game_ui *new_ui(const game_state *state) {
     ui->curx = ui->cury = 0;
     
     ui->show_grid = true;
+    
+    ui->path_dragging = false;
+    ui->drag_last_x = -1;
+    ui->drag_last_y = -1;
+    
     return ui;
 }
 
 static void free_ui(game_ui *ui) {
     sfree(ui->dragcoords);
     sfree(ui);
-}
-
-static char *encode_ui(const game_ui *ui) {
-    return NULL;
-}
-
-static void decode_ui(game_ui *ui, const char *encoding) {
 }
 
 static void game_changed_state(game_ui *ui, const game_state *oldstate,
@@ -1759,7 +1763,7 @@ static char *mark_in_direction(const game_state *state, int x, int y, int dir,
         if (((state->edge_h[edge] & FLAG_FIXED) > 0x00) ||
             (!primary && (state->edge_h[edge] & FLAG_PATH) > 0x00) || 
              (primary && (state->edge_h[edge] & FLAG_WALL) > 0x00))
-            return UI_UPDATE;
+            return MOVE_UI_UPDATE;
         if ((primary && (state->edge_h[edge] & FLAG_PATH) > 0x00) || 
             (!primary && (state->edge_h[edge] & FLAG_WALL) > 0x00))
              sprintf(buf,"C%d",edge);
@@ -1770,7 +1774,7 @@ static char *mark_in_direction(const game_state *state, int x, int y, int dir,
         if (((state->edge_v[edge] & FLAG_FIXED) > 0x00) ||
             (!primary && (state->edge_v[edge] & FLAG_PATH) > 0x00) || 
             (primary && (state->edge_v[edge] & FLAG_WALL) > 0x00))
-            return UI_UPDATE;
+            return MOVE_UI_UPDATE;
         if ((primary && (state->edge_v[edge] & FLAG_PATH) > 0x00) || 
             (!primary && (state->edge_v[edge] & FLAG_WALL) > 0x00))
             sprintf(buf,"C%d",edge+w*(h+1));
@@ -1800,7 +1804,7 @@ static char *interpret_move(const game_state *state, game_ui *ui,
         ui->cursor_active = false;
         if (ui->ndragcoords > 0 ) {
             ui->ndragcoords = -1;
-            return UI_UPDATE;
+            return MOVE_UI_UPDATE;
         }
         else {
             ui->ndragcoords = -1;
@@ -1815,7 +1819,67 @@ static char *interpret_move(const game_state *state, game_ui *ui,
                 if (abs(x-cx) < abs(y-cy)) dir = (y < cy) ? U : D;
                 else                       dir = (x < cx) ? L : R;
             }
-            return mark_in_direction(state, fx, fy, dir, button == LEFT_BUTTON, buf);
+
+            /* Start path dragging if clicking on a valid cell */
+            if (fx >= -1 && fx <= w && fy >= -1 && fy <= h && (!(fx == -1 || fx == w) || !(fy == -1 || fy == h))) {
+                ui->path_dragging = true;
+                ui->drag_last_x = fx;
+                ui->drag_last_y = fy;
+            }
+
+            if (button == LEFT_BUTTON) {
+                return NULL;
+            } else {
+                return mark_in_direction(state, fx, fy, dir, button == LEFT_BUTTON, buf);
+            }
+        }
+    }
+
+    if (button == LEFT_DRAG && ui->path_dragging) {
+        /* Check if we're over a valid cell */
+        if (fx >= -1 && fx <= w && fy >= -1 && fy <= h && (!(fx == -1 || fx == w) || !(fy == -1 || fy == h))) {
+          /* Check if the cell has changed */
+          if (fx != ui->drag_last_x || fy != ui->drag_last_y) {
+            /* Check if cells are adjacent */
+            int dx = fx - ui->drag_last_x;
+            int dy = fy - ui->drag_last_y;
+
+            if ((abs(dx) == 1 && dy == 0) || (dx == 0 && abs(dy) == 1)) {
+              /* Cells are adjacent, create a path between them */
+              int dir;
+              if (dx == 1)
+                dir = R;
+              else if (dx == -1)
+                dir = L;
+              else if (dy == 1)
+                dir = D;
+              else
+                dir = U;
+
+              char *result =
+                  mark_in_direction(state, ui->drag_last_x, ui->drag_last_y,
+                                    dir, true, buf);
+
+              /* Update the last cell position */
+              ui->drag_last_x = fx;
+              ui->drag_last_y = fy;
+
+              return result;
+            }
+            /* If not adjacent, just update position without creating a path */
+            ui->drag_last_x = fx;
+            ui->drag_last_y = fy;
+          }
+        }
+        return MOVE_UI_UPDATE;
+    }
+
+    if (button == LEFT_RELEASE) {
+        if (ui->path_dragging) {
+            ui->path_dragging = false;
+            ui->drag_last_x = -1;
+            ui->drag_last_y = -1;
+            return MOVE_UI_UPDATE;
         }
     }
 
@@ -1826,21 +1890,21 @@ static char *interpret_move(const game_state *state, game_ui *ui,
             ui->ndragcoords = -1;
             move = mark_in_direction(state, ui->curx, ui->cury, KEY_DIRECTION(button), control, buf);
             if (control && !shift && *move)
-                move_cursor(button, &ui->curx, &ui->cury, w, h, false);
+                move_cursor(button, &ui->curx, &ui->cury, w, h, false, NULL);
             return move;
         }
         else {
-            move_cursor(button, &ui->curx, &ui->cury, w, h, false);
+            move_cursor(button, &ui->curx, &ui->cury, w, h, false, NULL);
             /* if (ui->ndragcoords >= 0)
                 update_ui_drag(state, ui, ui->curx, ui->cury); */
         }
-        return UI_UPDATE;
+        return MOVE_UI_UPDATE;
     }
 
 
     if (button == 'G' || button == 'g') {
         ui->show_grid = !ui->show_grid;
-        return UI_UPDATE;
+        return MOVE_UI_UPDATE;
     }
     return NULL;
 }
@@ -1891,7 +1955,7 @@ static game_state *execute_move(const game_state *state, const char *move) {
  */
 
 static void game_compute_size(const game_params *params, int tilesize,
-                              int *x, int *y) {
+                              const game_ui *ui, int *x, int *y) {
    /* Ick: fake up `ds->tilesize' for macro expansion purposes */
     struct { int tilesize; } ads, *ds = &ads;
     ads.tilesize = tilesize;
@@ -2207,12 +2271,6 @@ static bool game_timing_state(const game_state *state, game_ui *ui) {
     return true;
 }
 
-static void game_print_size(const game_params *params, float *x, float *y) {
-}
-
-static void game_print(drawing *dr, const game_state *state, int tilesize) {
-}
-
 #ifdef COMBINED
 #define thegame walls
 #endif
@@ -2230,14 +2288,16 @@ const struct game thegame = {
     new_game_desc,
     validate_desc,
     new_game,
+    NULL, /* set_public_desc */
     dup_game,
     free_game,
     true, solve_game,
     true, game_can_format_as_text_now, game_text_format,
+    NULL, NULL, /* get_prefs, set_prefs */
     new_ui,
     free_ui,
-    encode_ui,
-    decode_ui,
+    NULL, /* encode_ui */
+    NULL, /* decode_ui */
     NULL, /* game_request_keys */
     game_changed_state,
     NULL, /* current_key_label */
@@ -2252,7 +2312,7 @@ const struct game thegame = {
     game_flash_length,
     game_get_cursor_location,
     game_status,
-    false, false, game_print_size, game_print,
+    false, false, NULL, NULL, /* print_size, print */
     false,                 /* wants_statusbar */
     false, game_timing_state,
     REQUIRE_RBUTTON,       /* flags */
