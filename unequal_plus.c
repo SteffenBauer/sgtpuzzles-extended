@@ -21,7 +21,11 @@
 #include <string.h>
 #include <assert.h>
 #include <ctype.h>
+#ifdef NO_TGMATH_H
 #include <math.h>
+#else
+#  include <tgmath.h>
+#endif
 
 #include "puzzles.h"
 #include "latin.h" /* contains typedef for digit */
@@ -62,6 +66,11 @@ typedef enum {
     MODE_KROPKI        /* Puzzle indicators are 'adjacent' and 'double' */
 } Mode;
 
+enum {
+    PREF_PENCIL_KEEP_HIGHLIGHT,
+    N_PREF_ITEMS
+};
+
 struct game_params {
     int order;          /* Size of latin square */
     int diff;           /* Difficulty */
@@ -91,6 +100,7 @@ struct game_params {
 #define ADJ_TO_DOUBLE(x) ((x) << 13)
 
 #define F_ERROR_MASK (F_ERROR|F_ERROR_UP|F_ERROR_RIGHT|F_ERROR_DOWN|F_ERROR_LEFT)
+#define F_SPENT_MASK (F_SPENT_UP|F_SPENT_RIGHT|F_SPENT_DOWN|F_SPENT_LEFT)
 
 struct game_state {
     int order;
@@ -978,13 +988,14 @@ static int solver_state(game_state *state, int maxdiff)
     struct latin_solver solver;
     int diff;
 
-    latin_solver_alloc(&solver, state->nums, state->order);
-
+    if (latin_solver_alloc(&solver, state->nums, state->order))
     diff = latin_solver_main(&solver, maxdiff,
          DIFF_LATIN, DIFF_SET, DIFF_EXTREME,
          DIFF_EXTREME, DIFF_RECURSIVE,
              unequal_solvers, unequal_valid, ctx,
                              clone_ctx, free_ctx);
+    else
+        diff = DIFF_IMPOSSIBLE;
 
     memcpy(state->hints, solver.cube, state->order*state->order*state->order);
 
@@ -1161,10 +1172,10 @@ static int gg_best_clue(game_state *state, int *scratch, digit *latin)
 }
 
 #ifdef STANDALONE_SOLVER
-int maxtries;
+static int maxtries;
 #define MAXTRIES maxtries
 #else
-#define MAXTRIES 1000
+#define MAXTRIES 50
 #endif
 static int gg_solved;
 
@@ -1602,6 +1613,17 @@ static char *solve_game(const game_state *state, const game_state *currstate,
 struct game_ui {
     int hx, hy;                         /* as for solo.c, highlight pos */
     bool hshow, hpencil, hcursor;       /* show state, type, and ?cursor. */
+
+    /*
+     * User preference option: if the user right-clicks in a square
+     * and presses a number key to add/remove a pencil mark, do we
+     * hide the mouse highlight again afterwards?
+     *
+     * Historically our answer was yes. The Android port prefers no.
+     * There are advantages both ways, depending how much you dislike
+     * the highlight cluttering your view. So it's a preference.
+     */
+    bool pencil_keep_highlight;
 };
 
 static game_ui *new_ui(const game_state *state)
@@ -1610,8 +1632,9 @@ static game_ui *new_ui(const game_state *state)
 
     ui->hx = ui->hy = 0;
     ui->hpencil = false;
-    ui->hshow = false;
-    ui->hcursor = false;
+    ui->hshow = ui->hcursor = getenv_bool("PUZZLES_SHOW_CURSOR", false);
+
+    ui->pencil_keep_highlight = false;
 
     return ui;
 }
@@ -1621,13 +1644,27 @@ static void free_ui(game_ui *ui)
     sfree(ui);
 }
 
-static char *encode_ui(const game_ui *ui)
+static config_item *get_prefs(game_ui *ui)
 {
-    return NULL;
+    config_item *ret;
+
+    ret = snewn(N_PREF_ITEMS+1, config_item);
+
+    ret[PREF_PENCIL_KEEP_HIGHLIGHT].name =
+        "Keep mouse highlight after changing a pencil mark";
+    ret[PREF_PENCIL_KEEP_HIGHLIGHT].kw = "pencil-keep-highlight";
+    ret[PREF_PENCIL_KEEP_HIGHLIGHT].type = C_BOOLEAN;
+    ret[PREF_PENCIL_KEEP_HIGHLIGHT].u.boolean.bval = ui->pencil_keep_highlight;
+
+    ret[N_PREF_ITEMS].name = NULL;
+    ret[N_PREF_ITEMS].type = C_END;
+
+    return ret;
 }
 
-static void decode_ui(game_ui *ui, const char *encoding)
+static void set_prefs(game_ui *ui, const config_item *cfg)
 {
+    ui->pencil_keep_highlight = cfg[PREF_PENCIL_KEEP_HIGHLIGHT].u.boolean.bval;
 }
 
 static void game_changed_state(game_ui *ui, const game_state *oldstate,
@@ -1640,6 +1677,14 @@ static void game_changed_state(game_ui *ui, const game_state *oldstate,
         GRID(newstate, nums, ui->hx, ui->hy) != 0) {
         ui->hshow = false;
     }
+}
+
+static const char *current_key_label(const game_ui *ui,
+                                     const game_state *state, int button)
+{
+    if (ui->hshow && IS_CURSOR_SELECT(button))
+        return ui->hpencil ? "Ink" : "Pencil";
+    return "";
 }
 
 struct game_drawstate {
@@ -1663,7 +1708,7 @@ static char *interpret_move(const game_state *state, game_ui *ui,
     char buf[80];
     bool shift_or_control = button & (MOD_SHFT | MOD_CTRL);
 
-    button &= ~MOD_MASK;
+    button = STRIP_BUTTON_MODIFIERS(button);
 
     if (x >= 0 && x < ds->order && y >= 0 && y < ds->order && IS_MOUSE_DOWN(button)) {
 	if (oy - COORD(y) > TILE_SIZE && ox - COORD(x) > TILE_SIZE)
@@ -1705,7 +1750,7 @@ static char *interpret_move(const game_state *state, game_ui *ui,
                 ui->hshow = true;
             }
             ui->hcursor = false;
-            return UI_UPDATE;
+            return MOVE_UI_UPDATE;
         }
         if (button == RIGHT_BUTTON) {
             /* pencil highlighting for non-filled squares */
@@ -1719,7 +1764,7 @@ static char *interpret_move(const game_state *state, game_ui *ui,
                 ui->hshow = true;
             }
             ui->hcursor = false;
-            return UI_UPDATE;
+            return MOVE_UI_UPDATE;
         }
     }
 
@@ -1728,7 +1773,7 @@ static char *interpret_move(const game_state *state, game_ui *ui,
 	    int nx = ui->hx, ny = ui->hy, i;
             unsigned long fh, fn;
             bool self;
-	    move_cursor(button, &nx, &ny, ds->order, ds->order, false);
+            move_cursor(button, &nx, &ny, ds->order, ds->order, false, NULL);
 	    ui->hshow = true;
             ui->hcursor = true;
 
@@ -1736,7 +1781,7 @@ static char *interpret_move(const game_state *state, game_ui *ui,
 				  ny != ui->hy + adjthan[i].dy); ++i);
 
 	    if (i == 4)
-		return UI_UPDATE; /* invalid direction, i.e. out of
+		return MOVE_UI_UPDATE; /* invalid direction, i.e. out of
                                    * the board */
 
             fh = GRID(state, flags, ui->hx, ui->hy);
@@ -1745,7 +1790,7 @@ static char *interpret_move(const game_state *state, game_ui *ui,
         if (!((fh & adjthan[i].f) || (fn & adjthan[i].fo)) &&
             !((fh & ADJ_TO_DOUBLE(adjthan[i].f)) ||
               (fn & ADJ_TO_DOUBLE(adjthan[i].fo))))
-		return UI_UPDATE; /* no clue to toggle */
+		return MOVE_UI_UPDATE; /* no clue to toggle */
 
 	    if (state->mode != MODE_UNEQUAL)
 		self = (adjthan[i].dx >= 0 && adjthan[i].dy >= 0);
@@ -1761,16 +1806,15 @@ static char *interpret_move(const game_state *state, game_ui *ui,
 
 	    return dupstr(buf);
 	} else {
-	    move_cursor(button, &ui->hx, &ui->hy, ds->order, ds->order, false);
-	    ui->hshow = true;
-            ui->hcursor = true;
-	    return UI_UPDATE;
+        ui->hcursor = true;
+        return move_cursor(button, &ui->hx, &ui->hy, ds->order, ds->order,
+                           false, &ui->hshow);
 	}
     }
     if (ui->hshow && IS_CURSOR_SELECT(button)) {
         ui->hpencil = !ui->hpencil;
         ui->hcursor = true;
-        return UI_UPDATE;
+        return MOVE_UI_UPDATE;
     }
 
     n = c2n(button, state->order);
@@ -1787,11 +1831,37 @@ static char *interpret_move(const game_state *state, game_ui *ui,
         if (ui->hpencil && GRID(state, nums, ui->hx, ui->hy) > 0)
             return NULL;        /* can't change hints on filled square (!) */
 
+        /*
+         * If you ask to fill a square with what it already contains,
+         * or blank it when it's already empty, that has no effect...
+         */
+        if ((!ui->hpencil || n == 0) &&
+            GRID(state, nums, ui->hx, ui->hy) == n) {
+            bool anypencil = false;
+            int i;
+            for (i = 0; i < state->order; i++)
+                anypencil = anypencil || HINT(state, ui->hx, ui->hy, i);
+            if (!anypencil) {
+                /* ... expect to remove the cursor in mouse mode. */
+                if (!ui->hcursor) {
+                    ui->hshow = false;
+                    return MOVE_UI_UPDATE;
+                }
+                return NULL;
+            }
+        }
 
         sprintf(buf, "%c%d,%d,%d",
                 (char)(ui->hpencil && n > 0 ? 'P' : 'R'), ui->hx, ui->hy, n);
 
-        if (!ui->hcursor) ui->hshow = false;
+        /*
+         * Hide the highlight after a keypress, if it was mouse-
+         * generated. Also, don't hide it if this move has changed
+         * pencil marks and the user preference says not to hide the
+         * highlight in that situation.
+         */
+        if (!ui->hcursor && !(ui->hpencil && ui->pencil_keep_highlight))
+            ui->hshow = false;
 
         return dupstr(buf);
     }
@@ -1807,7 +1877,7 @@ static char *interpret_move(const game_state *state, game_ui *ui,
 static game_state *execute_move(const game_state *state, const char *move)
 {
     game_state *ret = NULL;
-    int x, y, n, i, rc;
+    int x, y, n, i;
 
     debug(("execute_move: %s", move));
 
@@ -1832,7 +1902,7 @@ static game_state *execute_move(const game_state *state, const char *move)
         const char *p;
 
         ret = dup_game(state);
-        ret->completed = ret->cheated = true;
+        ret->cheated = true;
 
         p = move+1;
         for (i = 0; i < state->order*state->order; i++) {
@@ -1843,8 +1913,8 @@ static game_state *execute_move(const game_state *state, const char *move)
             p++;
         }
         if (*p) goto badmove;
-        rc = check_complete(ret->nums, ret, true);
-	assert(rc > 0);
+        if (!ret->completed && check_complete(ret->nums, ret, true) > 0)
+            ret->completed = true;
         return ret;
     } else if (move[0] == 'M') {
         ret = dup_game(state);
@@ -1861,7 +1931,8 @@ static game_state *execute_move(const game_state *state, const char *move)
         check_complete(ret->nums, ret, true);
         return ret;
     } else if (move[0] == 'F' && sscanf(move+1, "%d,%d,%d", &x, &y, &n) == 3 &&
-	       x >= 0 && x < state->order && y >= 0 && y < state->order) {
+	       x >= 0 && x < state->order && y >= 0 && y < state->order &&
+               (n & ~F_SPENT_MASK) == 0) {
 	ret = dup_game(state);
 	GRID(ret, flags, x, y) ^= n;
 	return ret;
@@ -1879,7 +1950,7 @@ badmove:
 #define DRAW_SIZE (TILE_SIZE*ds->order + GAP_SIZE*(ds->order-1) + BORDER*2)
 
 static void game_compute_size(const game_params *params, int tilesize,
-                              int *x, int *y)
+                              const game_ui *ui, int *x, int *y)
 {
     /* Ick: fake up `ds->tilesize' for macro expansion purposes */
     struct { int tilesize, order; } ads, *ds = &ads;
@@ -2279,27 +2350,37 @@ static float game_flash_length(const game_state *oldstate,
     return 0.0F;
 }
 
+static void game_get_cursor_location(const game_ui *ui,
+                                     const game_drawstate *ds,
+                                     const game_state *state,
+                                     const game_params *params,
+                                     int *x, int *y, int *w, int *h)
+{
+    if(ui->hshow) {
+        *x = COORD(ui->hx);
+        *y = COORD(ui->hy);
+        *w = *h = TILE_SIZE;
+    }
+}
+
 static int game_status(const game_state *state)
 {
     return state->completed ? +1 : 0;
 }
 
-static bool game_timing_state(const game_state *state, game_ui *ui)
-{
-    return true;
-}
-
-static void game_print_size(const game_params *params, float *x, float *y)
+static void game_print_size(const game_params *params, const game_ui *ui,
+                            float *x, float *y)
 {
     int pw, ph;
 
     /* 10mm squares by default, roughly the same as Grauniad. */
-    game_compute_size(params, 1000, &pw, &ph);
+    game_compute_size(params, 1000, ui, &pw, &ph);
     *x = pw / 100.0F;
     *y = ph / 100.0F;
 }
 
-static void game_print(drawing *dr, const game_state *state, int tilesize)
+static void game_print(drawing *dr, const game_state *state, const game_ui *ui,
+                       int tilesize)
 {
     int ink = print_mono_colour(dr, 0);
     int x, y, o = state->order, ox, oy, n;
@@ -2354,17 +2435,19 @@ const struct game thegame = {
     new_game_desc,
     validate_desc,
     new_game,
+    NULL, /* set_public_desc */
     dup_game,
     free_game,
     true, solve_game,
     true, game_can_format_as_text_now, game_text_format,
+    get_prefs, set_prefs,
     new_ui,
     free_ui,
-    encode_ui,
-    decode_ui,
+    NULL, /* encode_ui */
+    NULL, /* decode_ui */
     game_request_keys,
     game_changed_state,
-    NULL, /* current_key_label */
+    current_key_label,
     interpret_move,
     execute_move,
     PREFERRED_TILE_SIZE, game_compute_size, game_set_size,
@@ -2374,11 +2457,11 @@ const struct game thegame = {
     game_redraw,
     game_anim_length,
     game_flash_length,
-    NULL,
+    game_get_cursor_location,
     game_status,
     true, false, game_print_size, game_print,
     false,			       /* wants_statusbar */
-    false, game_timing_state,
+    false, NULL,                       /* timing_state */
     REQUIRE_RBUTTON | REQUIRE_NUMPAD,  /* flags */
 };
 
@@ -2391,7 +2474,7 @@ const struct game thegame = {
 #include <time.h>
 #include <stdarg.h>
 
-const char *quis = NULL;
+static const char *quis = NULL;
 
 #if 0 /* currently unused */
 
@@ -2459,13 +2542,14 @@ static int solve(game_params *p, char *desc, int debug)
     solver_show_working = debug;
     game_debug(state);
 
-    latin_solver_alloc(&solver, state->nums, state->order);
-
+    if (latin_solver_alloc(&solver, state->nums, state->order))
     diff = latin_solver_main(&solver, DIFF_RECURSIVE,
 			     DIFF_LATIN, DIFF_SET, DIFF_EXTREME,
 			     DIFF_EXTREME, DIFF_RECURSIVE,
 			     unequal_solvers, unequal_valid, ctx,
                              clone_ctx, free_ctx);
+    else
+        diff = DIFF_IMPOSSIBLE;
 
     free_ctx(ctx);
 

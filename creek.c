@@ -69,7 +69,7 @@ struct game_params {
 typedef struct game_clues {
     int w, h;
     signed char *clues;
-    int *tmpdsf;
+    DSF *tmpdsf;
     int refcount;
 } game_clues;
 
@@ -222,7 +222,7 @@ static const char *validate_params(const game_params *params, bool full)
 }
 
 struct solver_scratch_creek {
-    int *whitedsf;
+    DSF *whitedsf;
     signed char *tmpsoln;
     const signed char *clues;
     int depth;
@@ -230,7 +230,7 @@ struct solver_scratch_creek {
 
 static struct solver_scratch_creek *new_scratch_creek(int w, int h) {
     struct solver_scratch_creek *ret = snew(struct solver_scratch_creek);
-    ret->whitedsf = snewn(w*h, int);
+    ret->whitedsf = dsf_new(w*h);
     ret->tmpsoln = snewn(w*h, signed char);
     ret->depth = 0;
     return ret;
@@ -239,13 +239,17 @@ static struct solver_scratch_creek *new_scratch_creek(int w, int h) {
 static struct solver_scratch_creek *dup_scratch_creek(int w, int h, const struct solver_scratch_creek *scc) {
     struct solver_scratch_creek *ret = snew(struct solver_scratch_creek);
     if (scc->whitedsf != NULL) {
-        ret->whitedsf = snewn(w*h, int);
-        memcpy(ret->whitedsf, scc->whitedsf, w*h*sizeof(int));
+        ret->whitedsf = dsf_new(w*h);
+        dsf_copy(ret->whitedsf, scc->whitedsf);
+    } else {
+        ret->whitedsf = NULL;
     }     
     
     if (scc->tmpsoln != NULL) {
         ret->tmpsoln = snewn(w*h, signed char); 
         memcpy(ret->tmpsoln, scc->tmpsoln, w*h*sizeof(signed char));
+    } else {
+        ret->tmpsoln = NULL;
     }
     ret->clues = scc->clues;
     ret->depth = scc->depth;
@@ -253,7 +257,7 @@ static struct solver_scratch_creek *dup_scratch_creek(int w, int h, const struct
 }
 
 static void free_scratch_creek(struct solver_scratch_creek *scc) {
-    sfree(scc->whitedsf);
+    dsf_free(scc->whitedsf);
     sfree(scc->tmpsoln);
     sfree(scc);
 }
@@ -284,12 +288,12 @@ static int vertex_degree_creek(int w, int h, signed char *soln, int x, int y,
     return anti ? ret + (4-neigh) : ret;
 }
 
-static bool check_connectedness_creek(int w, int h, int *dsf,
+static bool check_connectedness_creek(int w, int h, DSF *dsf,
                      signed char *soln, const signed char *clues, int level) {
     int x, y, i, first_white = -1;
     int W = w+1, H = h+1;
     
-    dsf_init(dsf, w*h);
+    dsf_reinit(dsf);
     
     for (y = 0; y < h; y++) {
         for (x = 0; x < w; x++) {
@@ -356,7 +360,7 @@ static bool check_connectedness_creek(int w, int h, int *dsf,
         for (y = 0; y < h; y++) {
             for (x = 0; x < w; x++) {
                 if (soln[y*w+x] < 0) {
-                    if (dsf_canonify(dsf, first_white) != dsf_canonify(dsf, y*w+x)) {
+                    if (!dsf_equivalent(dsf, first_white, y*w+x)) {
                         return false;
                     }
                 }
@@ -391,7 +395,7 @@ static bool check_connectedness_creek(int w, int h, int *dsf,
                     co = 0;
                     for (i=0;i<nneigh;i++) {
                         if (soln[neighbours[i]] <= 0)
-                            if (dsf_canonify(dsf, first_white) == dsf_canonify(dsf, neighbours[i]))
+                            if (dsf_equivalent(dsf, first_white, neighbours[i]))
                                 co++;
                     }
                     if (co < nneigh-c)
@@ -408,7 +412,7 @@ static bool check_completed_creek(int w, int h,
            const signed char *clues,
            signed char *soln,
            unsigned char *errors,
-           int *dsf)
+           DSF *dsf)
 {
     int W = w+1, H = h+1;
     int x, y;
@@ -458,7 +462,7 @@ static void initialize_solver_creek(int w, int h, const signed char *clues,
                       int difficulty) {
     memset(soln, 0, w*h);
     scc->clues = clues;
-    dsf_init(scc->whitedsf, w*h);
+    dsf_reinit(scc->whitedsf);
     return;
 }
                       
@@ -682,7 +686,7 @@ static int creek_solve(int w, int h, const signed char *clues,
             }
         
         if (firstwhite >= 0) {
-            dsf_init(scc->whitedsf, w*h);
+            dsf_reinit(scc->whitedsf);
             for (i=0;i<w*h;i++) {
                 if (soln[i] == 1) continue;
                 x = i % w; y = i / w;
@@ -694,7 +698,7 @@ static int creek_solve(int w, int h, const signed char *clues,
             
             for (i=0;i<w*h;i++) {
                 if (soln[i] == 0) {
-                    if (dsf_canonify(scc->whitedsf, i) != dsf_canonify(scc->whitedsf, firstwhite)) {
+                    if (!dsf_equivalent(scc->whitedsf, i, firstwhite)) {
                         soln[i] = 1;
                         done_something = true; 
                     }
@@ -726,11 +730,12 @@ static int creek_solve(int w, int h, const signed char *clues,
 static void creek_generate(int w, int h, signed char *soln, random_state *rs)
 {
     int i;
-    int *connected, *whites, nw;
+    int *whites, nw;
+    DSF *connected;
     int ridx;
 
     memset(soln, -1, w*h);
-    connected = snew_dsf(w*h);
+    connected = dsf_new(w*h);
     whites = snewn(w*h, int);
 
     while(true) {
@@ -752,7 +757,7 @@ static void creek_generate(int w, int h, signed char *soln, random_state *rs)
     }
 
     sfree(whites);
-    sfree(connected);
+    dsf_free(connected);
 }
 
 static char *new_game_desc(const game_params *params, random_state *rs,
@@ -949,7 +954,7 @@ static game_state *new_game(midend *me, const game_params *params,
     state->clues->h = h;
     state->clues->clues = snewn(W*H, signed char);
     state->clues->refcount = 1;
-    state->clues->tmpdsf = snewn(W*H*2+W+H, int);
+    state->clues->tmpdsf = dsf_new(W*H*2+W+H);
     memset(state->clues->clues, -1, W*H);
     while (*desc) {
         int n = *desc++;
@@ -992,7 +997,7 @@ static void free_game(game_state *state)
     assert(state->clues);
     if (--state->clues->refcount <= 0) {
         sfree(state->clues->clues);
-        sfree(state->clues->tmpdsf);
+        dsf_free(state->clues->tmpdsf);
         sfree(state->clues);
     }
     sfree(state);
@@ -1126,15 +1131,6 @@ static void free_ui(game_ui *ui)
     sfree(ui);
 }
 
-static char *encode_ui(const game_ui *ui)
-{
-    return NULL;
-}
-
-static void decode_ui(game_ui *ui, const char *encoding)
-{
-}
-
 static void game_changed_state(game_ui *ui, const game_state *oldstate,
                                const game_state *newstate)
 {
@@ -1215,7 +1211,7 @@ static char *interpret_move(const game_state *state, game_ui *ui,
         int c;
         if (!ui->cur_visible) {
             ui->cur_visible = true;
-            return UI_UPDATE;
+            return MOVE_UI_UPDATE;
         }
         x = ui->cur_x;
         y = ui->cur_y;
@@ -1232,9 +1228,9 @@ static char *interpret_move(const game_state *state, game_ui *ui,
         sprintf(buf, "%c%d,%d", action, x, y);
         return dupstr(buf);
     } else if (IS_CURSOR_MOVE(button)) {
-        move_cursor(button, &ui->cur_x, &ui->cur_y, w, h, false);
+        move_cursor(button, &ui->cur_x, &ui->cur_y, w, h, false, NULL);
         ui->cur_visible = true;
-        return UI_UPDATE;
+        return MOVE_UI_UPDATE;
     }
 
     else if ((x < 0 || y < 0 || x >= w || y >= h) && 
@@ -1243,7 +1239,7 @@ static char *interpret_move(const game_state *state, game_ui *ui,
         ui->is_drag = false;
         ui->dx = ui->dy = -1;
         memset(ui->seln, false, w*h);
-        return UI_UPDATE;
+        return MOVE_UI_UPDATE;
     }
 
     else if (button == LEFT_BUTTON || button == RIGHT_BUTTON) {
@@ -1253,7 +1249,7 @@ static char *interpret_move(const game_state *state, game_ui *ui,
         ui->dx = x; ui->dy = y;
         memset(ui->seln, false, w*h);
         ui->seln[y*w+x] = true;
-        return UI_UPDATE;
+        return MOVE_UI_UPDATE;
     } else if (button == LEFT_DRAG || button == RIGHT_DRAG) {
         ui->cur_visible = false;
         if (!ui->is_drag) {
@@ -1266,14 +1262,14 @@ static char *interpret_move(const game_state *state, game_ui *ui,
                      (ui->mode == CLEAR && state->soln[y*w+x] != 0)) {
                      ui->seln[y*w+x] = true;
                      ui->dx = x; ui->dy = y;
-                     return UI_UPDATE;
+                     return MOVE_UI_UPDATE;
                 }
             } else if (ui->seln[ui->dy*w+ui->dx]){
                 if (((ui->mode == BLACK || ui->mode == WHITE) && state->soln[ui->dy*w+ui->dx] == 0) ||
                      (ui->mode == CLEAR && state->soln[ui->dy*w+ui->dx] != 0)) {
                      ui->seln[ui->dy*w+ui->dx] = false;
                      ui->dx = x; ui->dy = y;
-                     return UI_UPDATE;
+                     return MOVE_UI_UPDATE;
                 }
             }
             return NULL;
@@ -1314,7 +1310,7 @@ static char *interpret_move(const game_state *state, game_ui *ui,
 
         if (buflen == 0) {
             sfree(buf);
-            return UI_UPDATE;          /* drag was terminated */
+            return MOVE_UI_UPDATE;          /* drag was terminated */
         } else {
             buf[buflen] = '\0';
             return buf;
@@ -1371,7 +1367,7 @@ static game_state *execute_move(const game_state *state, const char *move)
  */
 
 static void game_compute_size(const game_params *params, int tilesize,
-                              int *x, int *y)
+                              const game_ui* ui, int *x, int *y)
 {
     /* fool the macros */
     struct dummy { int tilesize; } dummy, *ds = &dummy;
@@ -1532,7 +1528,7 @@ static void game_redraw(drawing *dr, game_drawstate *ds,
 
     if (!ds->started) {
         int ww, wh;
-        game_compute_size(&state->p, TILESIZE, &ww, &wh);
+        game_compute_size(&state->p, TILESIZE, NULL, &ww, &wh);
         draw_rect(dr, 0, 0, ww, wh, COL_BACKGROUND);
         draw_update(dr, 0, 0, ww, wh);
         ds->started = true;
@@ -1652,14 +1648,16 @@ const struct game thegame = {
     new_game_desc,
     validate_desc,
     new_game,
+    NULL, /* set_public_desc */
     dup_game,
     free_game,
     true, solve_game,
     true, game_can_format_as_text_now, game_text_format,
+    NULL, NULL, /* get_prefs, set_prefs */
     new_ui,
     free_ui,
-    encode_ui,
-    decode_ui,
+    NULL, /* encode_ui */
+    NULL, /* decode_ui */
     NULL, /* game_request_keys */
     game_changed_state,
     current_key_label,
