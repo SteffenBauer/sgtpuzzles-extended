@@ -1,6 +1,6 @@
 SAVEFILE:41:Simon Tatham's Portable Puzzle Collection
 VERSION :1:1
-GAME    :5:Creek
+GAME    :4:Flow
 PARAMS  :5:4x4dt
 CPARAMS :5:4x4dt
 SEED    :15:735338453632274

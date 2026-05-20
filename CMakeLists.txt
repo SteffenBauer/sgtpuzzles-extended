@@ -1,11 +1,11 @@
 
-set(creek_crop 193x193 160x160+16+16)
+set(flow_crop 193x193 160x160+16+16)
 set(unequal_plus_crop 208x208 135x135+61+13)
 set(undead_plus_crop 416x480 192x192+16+80)
 set(walls_crop 232x232 256x256+0+0)
 
-puzzle(creek
-  DISPLAYNAME "Creek"
+puzzle(flow
+  DISPLAYNAME "Flow"
   DESCRIPTION "Path-drawing puzzle"
   OBJECTIVE "Draw a connected path that matches the clues.")
 

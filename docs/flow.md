@@ -1,5 +1,5 @@
-### Creek
-![](https://raw.githubusercontent.com/SteffenBauer/sgtpuzzles-extended/master/screenshots/creek.png)
+### Flow
+![](https://raw.githubusercontent.com/SteffenBauer/sgtpuzzles-extended/master/screenshots/flow.png)
 
 *Status*: Fully implemented and playable  
 

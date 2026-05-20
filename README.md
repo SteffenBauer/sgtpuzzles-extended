@@ -10,16 +10,16 @@ Click on a puzzle for a description of individual game extensions
 <table>
 <tr>
 <td align="center"><b><a href="https://github.com/SteffenBauer/sgtpuzzles-extended/blob/master/docs/solo_plus.md">Solo+</a></b><br/>Additional solving tools</td>
-<td align="center"><b><a href="https://github.com/SteffenBauer/sgtpuzzles-extended/blob/master/docs/creek.md">Creek</a></b><br/>Find a path,<br/>matching the clues</td>
+<td align="center"><b><a href="https://github.com/SteffenBauer/sgtpuzzles-extended/blob/master/docs/flow.md">Flow</a></b><br/>Find a path,<br/>matching the clues</td>
 <td align="center"><b><a href="https://github.com/SteffenBauer/sgtpuzzles-extended/blob/master/docs/undead_plus.md">Undead+</a></b><br/>Extended game generator</td>
 </tr>
 <tr>
 <td><a href="https://github.com/SteffenBauer/sgtpuzzles-extended/blob/master/docs/solo_plus.md"><img src="https://raw.githubusercontent.com/SteffenBauer/sgtpuzzles-extended/master/screenshots/solo_plus.png"></a></td>
-<td><a href="https://github.com/SteffenBauer/sgtpuzzles-extended/blob/master/docs/creek.md"><img src="https://raw.githubusercontent.com/SteffenBauer/sgtpuzzles-extended/master/screenshots/creek.png"></a></td>
+<td><a href="https://github.com/SteffenBauer/sgtpuzzles-extended/blob/master/docs/flow.md"><img src="https://raw.githubusercontent.com/SteffenBauer/sgtpuzzles-extended/master/screenshots/flow.png"></a></td>
 <td><a href="https://github.com/SteffenBauer/sgtpuzzles-extended/blob/master/docs/undead_plus.md"><img src="https://raw.githubusercontent.com/SteffenBauer/sgtpuzzles-extended/master/screenshots/undead_plus.png"></a></td>
 </tr>
 <tr>
-<td align="center"><b><a href="https://github.com/SteffenBauer/sgtpuzzles-extended/blob/master/docs/unequal_plus.md">Unequal+</a></b><br/>Puzzle variation <i>Kropki</i></td>
+<td align="center"><b><a href="https://github.com/SteffenBauer/sgtpuzzles-extended/blob/master/docs/unequal_plus.md">Unequal+</a></b><br/>Puzzle variation <i>Dots</i></td>
 <td align="center"><b><a href="https://github.com/SteffenBauer/sgtpuzzles-extended/blob/master/docs/walls.md">Walls</a></b><br/>Find a path through a maze of walls</td>
 <td align="center"><b><a href="https://github.com/SteffenBauer/sgtpuzzles-extended/blob/master/docs/stellar.md">Stellar</a></b><br/>Place stars and nebulae<br/>so that the given planets<br/>are correctly illuminated.</td>
 </tr>

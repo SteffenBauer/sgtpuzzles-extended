@@ -1,7 +1,7 @@
 ### Unequal+
 ![](https://raw.githubusercontent.com/SteffenBauer/sgtpuzzles-extended/master/screenshots/unequal_plus.png)
 
-Contains a new puzzle variation: *Kropki*, implementation of [Kropki](http://wiki.logic-masters.de/index.php?title=Kropki/de)
+Contains a new puzzle variation: *Dots*, implementation of [Kropki](http://wiki.logic-masters.de/index.php?title=Kropki/de)
 
 Works similiar to the *Adjacent* mode, with these rules:
 

@@ -63,7 +63,7 @@ enum {
 typedef enum {
     MODE_UNEQUAL,      /* Puzzle indicators are 'greater-than'. */
     MODE_ADJACENT,     /* Puzzle indicators are 'adjacent number'. */
-    MODE_KROPKI        /* Puzzle indicators are 'adjacent' and 'double' */
+    MODE_DOTS         /* Puzzle indicators are 'adjacent' and 'double' */
 } Mode;
 
 enum {
@@ -158,7 +158,7 @@ static bool game_fetch_preset(int i, char **name, game_params **params)
     *ret = unequal_presets[i]; /* structure copy */
 
     sprintf(buf, "%s: %dx%d %s",
-            ret->mode == MODE_KROPKI   ? "Kropki" : 
+            ret->mode == MODE_DOTS     ? "Dots" : 
             ret->mode == MODE_ADJACENT ? "Adjacent" : 
                                          "Unequal",
             ret->order, ret->order,
@@ -200,7 +200,7 @@ static void decode_params(game_params *ret, char const *string)
 
     if (*p == 'k') {
         p++;
-        ret->mode = MODE_KROPKI;
+        ret->mode = MODE_DOTS;
     } else if (*p == 'a') {
         p++;
         ret->mode = MODE_ADJACENT;
@@ -226,7 +226,7 @@ static char *encode_params(const game_params *params, bool full)
     char ret[80];
 
     sprintf(ret, "%d", params->order);
-    if (params->mode == MODE_KROPKI)
+    if (params->mode == MODE_DOTS)
         sprintf(ret + strlen(ret), "k");
     else if (params->mode == MODE_ADJACENT)
         sprintf(ret + strlen(ret), "a");
@@ -245,7 +245,7 @@ static config_item *game_configure(const game_params *params)
 
     ret[0].name = "Mode";
     ret[0].type = C_CHOICES;
-    ret[0].u.choices.choicenames = ":Unequal:Adjacent:Kropki";
+    ret[0].u.choices.choicenames = ":Unequal:Adjacent:Dots";
     ret[0].u.choices.selected = params->mode;
 
     ret[1].name = "Size (s*s)";
@@ -361,7 +361,7 @@ static bool check_num_adj(digit *grid, game_state *state,
         assert (n != 0);
         if (dn == 0) continue;
 
-        if (state->mode == MODE_KROPKI) {
+        if (state->mode == MODE_DOTS) {
             int gd = abs(n-dn);
             int id = (2*n == dn || 2*dn == n);
             int ot = (n == 1 && dn == 2) || (n == 2 && dn == 1);
@@ -525,7 +525,7 @@ static char *game_text_format(const game_state *state)
             *p++ = n > 0 ? n2c(n, state->order) : '.';
 
             if (x < (state->order-1)) {
-                if (state->mode == MODE_KROPKI) {
+                if (state->mode == MODE_DOTS) {
                     if (GRID(state, flags, x, y) & F_DBL_RIGHT) 
                         *p++ = '*';
                     else if (GRID(state, flags, x, y) & F_ADJ_RIGHT)
@@ -548,7 +548,7 @@ static char *game_text_format(const game_state *state)
 
         if (y < (state->order-1)) {
             for (x = 0; x < state->order; x++) {
-                if (state->mode == MODE_KROPKI) {
+                if (state->mode == MODE_DOTS) {
                     if (GRID(state, flags, x, y) & F_DBL_DOWN)
                         *p++ = '*';
                     else if (GRID(state, flags, x, y) & F_ADJ_DOWN)
@@ -632,7 +632,7 @@ static struct solver_ctx *new_ctx(game_state *state)
     ctx->state = state;
 
     if (state->mode != MODE_UNEQUAL)
-        return ctx; /* adjacent and kropki mode don't use links. */
+        return ctx; /* adjacent and dots mode don't use links. */
 
     for (x = 0; x < o; x++) {
         for (y = 0; y < o; y++) {
@@ -753,7 +753,7 @@ static int solver_adjacent(struct latin_solver *solver, void *vctx)
 
             /* We have a definite number here. Make sure that any
              * adjacent possibles reflect the adjacent/non-adjacent clue. 
-             * For Kropki puzzles, additionally check double/non-double clues. */
+             * For Dots puzzles, additionally check double/non-double clues. */
 
             for (i = 0; i < 4; i++) {
                 bool isadjacent =
@@ -769,7 +769,7 @@ static int solver_adjacent(struct latin_solver *solver, void *vctx)
                     /* Continue past numbers the adjacent square _could_ be,
                      * given the clue we have. */
                     gd = abs((n+1) - grid(x, y));
-                    if (ctx->state->mode == MODE_KROPKI) {
+                    if (ctx->state->mode == MODE_DOTS) {
                         int ot = ( (n+1) == 1 && grid(x,y) == 2) || ( (n+1) == 2 && grid(x,y) == 1);    
                         int dbl = ( (n+1)*2 == grid(x,y) || (n+1) == 2*grid(x,y) );
                         if (ot && (isdouble || isadjacent)) continue;
@@ -785,8 +785,8 @@ static int solver_adjacent(struct latin_solver *solver, void *vctx)
 
 #ifdef STANDALONE_SOLVER
                     if (solver_show_working) {
-                        if (ctx->state->mode == MODE_KROPKI)
-                            printf("%*skropki elimination, (%d,%d):%d %s (%d,%d):\n",
+                        if (ctx->state->mode == MODE_DOTS)
+                            printf("%*sdots elimination, (%d,%d):%d %s (%d,%d):\n",
                                    solver_recurse_depth*4, "",
                                    x+1, y+1, grid(x, y), 
                                         isadjacent ? "O" : 
@@ -817,7 +817,7 @@ static int solver_adjacent_set(struct latin_solver *solver, void *vctx)
 
     /* Update possible values based on other possible values
      * of adjacent squares, and adjacency clues. 
-     * and also double clues in kropki mode */
+     * and also double clues in dots mode */
 
     for (x = 0; x < o; x++) {
         for (y = 0; y < o; y++) {
@@ -845,7 +845,7 @@ static int solver_adjacent_set(struct latin_solver *solver, void *vctx)
                         if (n == nn) continue;
 
                         gd = abs(nn - n);
-                        if (ctx->state->mode == MODE_KROPKI) {
+                        if (ctx->state->mode == MODE_DOTS) {
                             int ot = (nn == 1 && n == 2) || (nn == 2 && n == 1);
                             int dbl = ( ((nn+1)*2 == (n+1)) || ((nn+1) == 2*(n+1)) );
                             if (ot && !(isdouble || isadjacent)) continue;
@@ -869,8 +869,8 @@ static int solver_adjacent_set(struct latin_solver *solver, void *vctx)
 
 #ifdef STANDALONE_SOLVER
                     if (solver_show_working) {
-                        if (ctx->state->mode == MODE_KROPKI)
-                            printf("%*skropki elimination, (%d,%d):%d %s (%d,%d):\n",
+                        if (ctx->state->mode == MODE_DOTS)
+                            printf("%*sdots elimination, (%d,%d):%d %s (%d,%d):\n",
                                    solver_recurse_depth*4, "",
                                    x+1, y+1, grid(x, y), 
                                         isadjacent ? "O" : 
@@ -1072,7 +1072,7 @@ static bool gg_place_clue(game_state *state, int ccode, digit *latin, bool check
         int lx, ly, lloc;
 
         if (state->mode != MODE_UNEQUAL)
-            return false; /* never add flag clues in adjacent or kropki mode
+            return false; /* never add flag clues in adjacent or dots mode
                              (they're always all present) */
 
         if (state->flags[loc] & adjthan[which].f)
@@ -1116,7 +1116,7 @@ static bool gg_remove_clue(game_state *state, int ccode, bool checkonly)
         }
     } else {                    /* remove flag */
         if (state->mode != MODE_UNEQUAL)
-            return false; /* never remove clues in adjacent or kropki mode. */
+            return false; /* never remove clues in adjacent or dots mode. */
 
         if (!(state->flags[loc] & adjthan[which].f)) return false;
         if (!checkonly) {
@@ -1256,13 +1256,13 @@ static void game_strip(game_state *new, int *scratch, digit *latin,
 #endif
 }
 
-static void add_kropki_flags(game_state *state, digit *latin, random_state *rs)
+static void add_dots_flags(game_state *state, digit *latin, random_state *rs)
 {
     int x, y, o = state->order;
     int lay_double;
     int lay_adjacent;
 
-    /* All clues in kropki mode are always present (the only variables are
+    /* All clues in dots mode are always present (the only variables are
      * the numbers). This adds all the flags to state based on the supplied
      * latin square. */
 
@@ -1363,9 +1363,9 @@ generate:
     memset(state->nums, 0, o2 * sizeof(digit));
     memset(state->flags, 0, o2 * sizeof(unsigned long));
 
-    if (state->mode == MODE_KROPKI) {
-        /* All kropki flags are always present. */
-        add_kropki_flags(state, sq, rs);
+    if (state->mode == MODE_DOTS) {
+        /* All dots flags are always present. */
+        add_dots_flags(state, sq, rs);
     }
     else if (state->mode == MODE_ADJACENT) {
         /* All adjacency flags are always present. */
@@ -1467,11 +1467,11 @@ static game_state *load_game(const game_params *params, const char *desc,
 
         while (*p == 'U' || *p == 'R' || *p == 'D' || *p == 'L' || *p == '*') {
             switch (*p) {
-            case '*': if (params->mode != MODE_KROPKI) {
-                        why = "Double flag * in non-kropki game description";
+            case '*': if (params->mode != MODE_DOTS) {
+                        why = "Double flag * in non-dots game description";
                         goto fail;
                       } else if (dbl) {
-                        why = "Multiple * double flag in kropki game description";
+                        why = "Multiple * double flag in dots game description";
                         goto fail;
                       }
                       dbl = true; break;
@@ -1503,8 +1503,8 @@ static game_state *load_game(const game_params *params, const char *desc,
                 int nx = x + adjthan[n].dx;
                 int ny = y + adjthan[n].dy;
                 if (GRID(state, flags, x, y) & ADJ_TO_DOUBLE(adjthan[n].f)) {
-                    if (params-> mode != MODE_KROPKI) {
-                        why = "Double flags are only allowed in Kropki mode"; goto fail;
+                    if (params-> mode != MODE_DOTS) {
+                        why = "Double flags are only allowed in Dots mode"; goto fail;
                     }
                     /* a flag must not point us off the grid. */
                     if (nx < 0 || ny < 0 || nx >= o || ny >= o) {
@@ -2125,7 +2125,7 @@ static void draw_adjs(drawing *dr, game_drawstate *ds, int ox, int oy,
     draw_update(dr, ox, oy+TILE_SIZE, TILE_SIZE, g);
 }
 
-static void draw_krps(drawing *dr, game_drawstate *ds, int ox, int oy,
+static void draw_dots(drawing *dr, game_drawstate *ds, int ox, int oy,
                       unsigned long f, int bg, int fg, int fg2)
 {
     int g = GAP_SIZE, g38 = 3*(g+1)/8, g4 = (g+1)/4, g2=(g+1)/2;
@@ -2202,8 +2202,8 @@ static void draw_furniture(drawing *dr, game_drawstate *ds,
     draw_update(dr, ox, oy, TILE_SIZE, TILE_SIZE);
 
     /* Draw the adjacent clue signs. */
-    if (ds->mode == MODE_KROPKI)
-        draw_krps(dr, ds, ox, oy, f, COL_BACKGROUND, COL_BLACK, COL_WHITE);
+    if (ds->mode == MODE_DOTS)
+        draw_dots(dr, ds, ox, oy, f, COL_BACKGROUND, COL_BLACK, COL_WHITE);
     else if (ds->mode == MODE_ADJACENT)
         draw_adjs(dr, ds, ox, oy, f, COL_BACKGROUND, COL_GRID);
     else
@@ -2602,7 +2602,7 @@ static void soak(game_params *p, random_state *rs)
     tt_start = tt_now = time(NULL);
 
     printf("Soak-generating an %s %dx%d grid, difficulty %s.\n",
-           p->mode == MODE_KROPKI   ? "kropki" :
+           p->mode == MODE_DOTS     ? "dots" :
            p->mode == MODE_ADJACENT ? "adjacent" : 
                                       "unequal",
            p->order, p->order, unequal_diffnames[p->diff]);
