@@ -48,14 +48,6 @@ cp sgtpuzzles-extended/savefiles/*.sav icons/
 
 [Example code](https://github.com/SteffenBauer/sgtpuzzles-extended/blob/master/Examples) for the utility API.
 
-## Android
-
-Files for the [Android port by Chris Boyle](https://github.com/chrisboyle/sgtpuzzles)
-
-Contains also the puzzles [boats, rome and salad](https://github.com/x-sheep/puzzles-unreleased) by Lennard Sprong
-
-**Outdated**, won't compile with current Android version.
-
 ## LICENSE
 
 Copyright (c) 2013-2021 Simon Tatham, Steffen Bauer
